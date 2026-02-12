@@ -24,15 +24,28 @@ export function getSetSquareHit(pos, setSquareState) {
     if (localX >= -5 && localY >= -5 && (localX + localY) <= size + 5) {
         const handleZoneWidth = 40;
         const hypotenuseZoneThickness = 25;
+        const drawingEdgeThickness = 20;
+        const zoneGap = 5; // Espace entre les zones
 
-        // Check for rotation handles at the three corners first to give them priority
+        // Priorité 1: Vérifier les bords de dessin (en excluant les coins de rotation et avec un espacement).
+        const onH = localY >= 0 && localY <= drawingEdgeThickness && localX >= handleZoneWidth + zoneGap && localX <= size - (handleZoneWidth + zoneGap);
+        const onV = localX >= 0 && localX <= drawingEdgeThickness && localY >= handleZoneWidth + zoneGap && localY <= size - (handleZoneWidth + zoneGap);
+
+        if (onH) {
+            return 'drawing-edge-h';
+        }
+        if (onV) {
+            return 'drawing-edge-v';
+        }
+
+        // Priorité 2: Vérifier les poignées de rotation aux trois coins.
         if (Math.hypot(localX, localY) < handleZoneWidth || 
             Math.hypot(localX - size, localY) < handleZoneWidth ||
             Math.hypot(localX, localY - size) < handleZoneWidth) {
             return 'rotating';
         }
 
-        // Then, check for hypotenuse (horizontal move)
+        // Priorité 3: Vérifier l'hypoténuse (glissement).
         // Distance from point to line x+y-size=0 is |x+y-size|/sqrt(2)
         const distToHypotenuse = Math.abs(localX + localY - size) / Math.SQRT2;
         if (distToHypotenuse < hypotenuseZoneThickness) {
@@ -78,6 +91,16 @@ export function drawSetSquare(ctx, setSquareState) {
     const handleZoneWidth = 40;
     const hypotenuseZoneThickness = 25;
     const hintFillStyle = 'rgba(0, 0, 0, 0.07)';
+    const slideHintStyle = 'rgba(0, 0, 255, 0.07)'; // Teinte bleutée pour le glissement
+    const drawingEdgeThickness = 20;
+    const zoneGap = 5;
+
+    // Indice visuel pour les bords de dessin
+    ctx.fillStyle = hintFillStyle;
+    // Bord horizontal, en laissant de la place pour les poignées de rotation
+    ctx.fillRect(handleZoneWidth + zoneGap, 0, size - 2 * (handleZoneWidth + zoneGap), drawingEdgeThickness);
+    // Bord vertical, en laissant de la place pour les poignées de rotation
+    ctx.fillRect(0, handleZoneWidth + zoneGap, drawingEdgeThickness, size - 2 * (handleZoneWidth + zoneGap));
 
     // Rotation handles
     ctx.fillStyle = hintFillStyle;
@@ -98,7 +121,7 @@ export function drawSetSquare(ctx, setSquareState) {
     ctx.moveTo(size, 0);
     ctx.lineTo(0, size);
     ctx.lineWidth = hypotenuseZoneThickness * 2;
-    ctx.strokeStyle = hintFillStyle;
+    ctx.strokeStyle = slideHintStyle;
     ctx.stroke();
 
     ctx.restore(); // Remove clipping mask
@@ -177,7 +200,7 @@ export function handleMouseMove(currentMousePos, setSquareState, setSquareDragMo
         if (snapResult.snapped) {
             if (snapResult.type === 'line') {
                 let finalAngle = snapResult.angle;
-                // side < 0 signifie que le curseur est "au-dessus" de la ligne. On retourne l'équerre.
+                // Si on approche par "au-dessus", on retourne l'équerre pour coller le bon côté
                 if (snapResult.side < 0) {
                     finalAngle += Math.PI;
                 }
@@ -224,4 +247,49 @@ export function handleMouseMove(currentMousePos, setSquareState, setSquareDragMo
     }
 
     return snapResult;
+}
+
+/**
+ * Projette un point sur un des bords de dessin de l'équerre.
+ * @param {{x: number, y: number}} pos - La position de la souris.
+ * @param {object} setSquareState - L'état de l'équerre.
+ * @param {'h'|'v'} edgeType - Le type de bord ('h' pour horizontal, 'v' pour vertical).
+ * @returns {{x: number, y: number}} Le point projeté.
+ */
+export function projectOnEdge(pos, setSquareState, edgeType, clamp = true) {
+    const { cornerX, cornerY, size, angle } = setSquareState;
+
+    const p1 = { x: cornerX, y: cornerY };
+    let p2;
+
+    if (edgeType === 'h') {
+        // Bord horizontal (gradué)
+        p2 = {
+            x: cornerX + size * Math.cos(angle),
+            y: cornerY + size * Math.sin(angle)
+        };
+    } else { // 'v'
+        // Bord vertical
+        p2 = {
+            x: cornerX + size * Math.cos(angle + Math.PI / 2),
+            y: cornerY + size * Math.sin(angle + Math.PI / 2)
+        };
+    }
+
+    // Logique de projection de point sur un segment de ligne
+    const dx = p2.x - p1.x;
+    const dy = p2.y - p1.y;
+    const lineLengthSq = dx * dx + dy * dy;
+
+    if (lineLengthSq === 0) return p1;
+
+    let t = ((pos.x - p1.x) * dx + (pos.y - p1.y) * dy) / lineLengthSq;
+    if (clamp) {
+        t = Math.max(0, Math.min(1, t)); // Clamp to the segment
+    }
+
+    return {
+        x: p1.x + t * dx,
+        y: p1.y + t * dy
+    };
 }

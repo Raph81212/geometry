@@ -38,6 +38,8 @@ document.addEventListener('DOMContentLoaded', () => {
     let currentTool = null;
     let isDrawingLine = false; // Pour gérer le dessin de ligne en 2 clics
     let lineStartPoint = null;
+    let isDrawingOnTool = false; // Pour tracer une ligne le long d'un outil
+    let toolDrawingInfo = null; // { tool: 'ruler'|'setsquare', startPos: {x,y}, edge?: 'h'|'v' }
     // --- État du compas persistant ---
     let compassState = {
         center: null, // {x, y} - La pointe
@@ -177,9 +179,19 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Dessine la ligne temporaire en cours de création
         if (isDrawingLine && lineStartPoint && currentMousePos) {
+            let endPos = currentMousePos;
+            // Si on dessine le long d'un outil, on contraint le point final
+            if (isDrawingOnTool) {
+                if (toolDrawingInfo.tool === 'ruler') {
+                    endPos = ruler.projectOnEdge(currentMousePos, rulerState, false); // false pour prolonger
+                } else if (toolDrawingInfo.tool === 'setsquare') {
+                    endPos = setsquare.projectOnEdge(currentMousePos, setSquareState, toolDrawingInfo.edge, false); // false pour prolonger
+                }
+            }
+
             ctx.beginPath();
             ctx.moveTo(lineStartPoint.x, lineStartPoint.y);
-            ctx.lineTo(currentMousePos.x, currentMousePos.y);
+            ctx.lineTo(endPos.x, endPos.y); // Utilise le point final (contraint ou non)
             // Utilise la couleur actuelle avec de la transparence
             ctx.strokeStyle = currentColor + '80'; // Ajoute 50% d'opacité (hex 80)
             ctx.lineWidth = 2;
@@ -258,7 +270,7 @@ document.addEventListener('DOMContentLoaded', () => {
         ctx.beginPath();
         ctx.moveTo(line.x1, line.y1);
         ctx.lineTo(line.x2, line.y2);
-        ctx.strokeStyle = line.color || '#0000FF';
+    ctx.strokeStyle = line.color || '#000000';
         ctx.lineWidth = 2;
         ctx.stroke();
     }
@@ -489,9 +501,19 @@ document.addEventListener('DOMContentLoaded', () => {
         // Check for ruler interaction
         const rulerHit = ruler.getRulerHit(mousePos, rulerState);
         if (rulerHit) {
-            const result = ruler.handleMouseDown(mousePos, rulerState, rulerDragStart);
-            isDraggingRuler = result.isDragging;
-            rulerDragMode = result.dragMode;
+            if (rulerHit === 'drawing-edge') {
+                saveState();
+                isDrawingOnTool = true;
+                const startPos = ruler.projectOnEdge(mousePos, rulerState);
+                toolDrawingInfo = { tool: 'ruler', startPos };
+                // On utilise les variables existantes pour le tracé temporaire
+                isDrawingLine = true;
+                lineStartPoint = startPos;
+            } else {
+                const result = ruler.handleMouseDown(mousePos, rulerState, rulerDragStart);
+                isDraggingRuler = result.isDragging;
+                rulerDragMode = result.dragMode;
+            }
             return; // Interaction handled.
         }
 
@@ -516,11 +538,22 @@ document.addEventListener('DOMContentLoaded', () => {
         // Check for set square interaction
         const setSquareHit = setsquare.getSetSquareHit(mousePos, setSquareState);
         if (setSquareHit) {
-            // If we are about to interact with the set square, check its current snap status
-            const currentSnapInfo = snap.getSnap({ x: setSquareState.cornerX, y: setSquareState.cornerY }, shapes);
-            const result = setsquare.handleMouseDown(mousePos, setSquareState, setSquareDragStart, currentSnapInfo);
-            isDraggingSetSquare = result.isDragging;
-            setSquareDragMode = result.dragMode;
+            if (setSquareHit.startsWith('drawing-edge')) {
+                saveState();
+                isDrawingOnTool = true;
+                const edgeType = setSquareHit.split('-')[2];
+                const startPos = setsquare.projectOnEdge(mousePos, setSquareState, edgeType);
+                toolDrawingInfo = { tool: 'setsquare', startPos, edge: edgeType };
+                // On utilise les variables existantes pour le tracé temporaire
+                isDrawingLine = true;
+                lineStartPoint = startPos;
+            } else {
+                // If we are about to interact with the set square, check its current snap status
+                const currentSnapInfo = snap.getSnap({ x: setSquareState.cornerX, y: setSquareState.cornerY }, shapes);
+                const result = setsquare.handleMouseDown(mousePos, setSquareState, setSquareDragStart, currentSnapInfo);
+                isDraggingSetSquare = result.isDragging;
+                setSquareDragMode = result.dragMode;
+            }
             return; // Interaction handled.
         }
 
@@ -567,6 +600,26 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function executeMouseUp(mousePos) {
         let needsRedraw = false;
+
+        if (isDrawingOnTool) {
+            let endPos = mousePos;
+            if (toolDrawingInfo.tool === 'ruler') {
+                endPos = ruler.projectOnEdge(mousePos, rulerState, false); // false pour prolonger
+            } else if (toolDrawingInfo.tool === 'setsquare') {
+                endPos = setsquare.projectOnEdge(mousePos, setSquareState, toolDrawingInfo.edge, false); // false pour prolonger
+            }
+
+            // Ne dessine pas une ligne de longueur nulle
+            if (Math.hypot(endPos.x - toolDrawingInfo.startPos.x, endPos.y - toolDrawingInfo.startPos.y) > 2) {
+                shapes.push({ type: 'line', x1: toolDrawingInfo.startPos.x, y1: toolDrawingInfo.startPos.y, x2: endPos.x, y2: endPos.y, color: currentColor });
+            }
+
+            isDrawingOnTool = false;
+            toolDrawingInfo = null;
+            isDrawingLine = false;
+            lineStartPoint = null;
+            needsRedraw = true;
+        }
 
         if (isDraggingCompass) {
             compass.handleMouseUp(compassDragMode, arcState, compassState, shapes, saveState);
