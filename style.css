@@ -66,6 +66,13 @@ button:hover {
     border-color: #0056b3;
 }
 
+.tool-options {
+    display: none; /* Caché par défaut */
+    align-items: center;
+    gap: 5px;
+    font-size: 14px;
+}
+
 #color-picker {
     -webkit-appearance: none;
     -moz-appearance: none;

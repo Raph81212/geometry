@@ -15,6 +15,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const undoButton = document.getElementById('btn-undo');
     const redoButton = document.getElementById('btn-redo');
     const colorPicker = document.getElementById('color-picker');
+    const rulerOptions = document.getElementById('ruler-options');
+    const rulerLengthInput = document.getElementById('ruler-length');
 
     // --- État de l'application ---
     let shapes = []; // Notre "modèle", la liste de toutes les formes dessinées
@@ -40,9 +42,9 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- État de la règle persistante ---
     let rulerState = {
         visible: false,
-        x: 150, // top-left corner x
-        y: 150, // top-left corner y
-        width: 400,
+        zeroX: 150, // '0' point x
+        zeroY: 200, // '0' point y
+        maxLengthCm: 10,
         height: 50,
         angle: 0, // in radians
     };
@@ -222,6 +224,28 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    function updateToolButtons() {
+        toolButtons.forEach(button => {
+            const btnToolName = button.id.split('-')[1];
+            let isActive = false;
+            if (btnToolName === 'ruler') {
+                isActive = rulerState.visible;
+            } else if (btnToolName === 'compass') {
+                // Active if it's on screen OR if we are in placement mode.
+                isActive = !!compassState.center || currentTool === 'compass';
+            } else {
+                // Active if it's the current tool.
+                isActive = currentTool === btnToolName;
+            }
+
+            if (isActive) {
+                button.classList.add('active');
+            } else {
+                button.classList.remove('active');
+            }
+        });
+    }
+
     // --- Logique des outils ---
 
     /**
@@ -229,31 +253,38 @@ document.addEventListener('DOMContentLoaded', () => {
      * @param {string} toolName - Le nom de l'outil ('point', 'line').
      */
     function setActiveTool(toolName) {
-        currentTool = toolName;
-        // Réinitialise les dessins en cours si on change d'outil
-        isDrawingLine = false; // Réinitialise le dessin de ligne si on change d'outil
+        // --- Handle Toggling Persistent Tools ---
+        if (toolName === 'ruler') {
+            rulerState.visible = !rulerState.visible;
+            rulerOptions.style.display = rulerState.visible ? 'flex' : 'none';
+        } else if (toolName === 'compass') {
+            // If compass is on screen, remove it.
+            if (compassState.center) {
+                compassState.center = null;
+                compassState.pencil = null;
+                compassState.radius = 0;
+                if (currentTool === 'compass') currentTool = null;
+            } else {
+                // If compass is not on screen, set it as the active tool to be placed.
+                currentTool = 'compass';
+            }
+        } else { // For 'point', 'line'
+            // If we click the same tool again, deselect it. Otherwise, select it.
+            currentTool = (currentTool === toolName) ? null : toolName;
+        }
+
+        // --- Stop any ongoing drag operations ---
+        isDrawingLine = false;
         lineStartPoint = null;
-        // Arrête toute manipulation de compas si on change d'outil
         isDraggingCompass = false;
         compassDragMode = null;
-        // Arrête toute manipulation de règle
         isDraggingRuler = false;
         rulerDragMode = null;
 
-        // Gère la visibilité de la règle
-        rulerState.visible = (toolName === 'ruler');
-
-        currentMousePos = null;
-
-        toolButtons.forEach(button => {
-            if (button.id === `tool-${toolName}`) {
-                button.classList.add('active');
-            } else {
-                button.classList.remove('active');
-            }
-        });
+        // --- Update UI ---
+        updateToolButtons();
         console.log(`Outil actif : ${currentTool}`);
-        redrawCanvas(); // Force le rafraîchissement pour effacer les dessins temporaires
+        redrawCanvas();
     }
 
     // Ajoute les écouteurs d'événements aux boutons d'outils
@@ -263,6 +294,14 @@ document.addEventListener('DOMContentLoaded', () => {
             const toolName = button.id.split('-')[1];
             setActiveTool(toolName);
         });
+    });
+
+    rulerLengthInput.addEventListener('input', (e) => {
+        const newLength = parseInt(e.target.value, 10);
+        if (!isNaN(newLength) && newLength > 0) {
+            rulerState.maxLengthCm = newLength;
+            redrawCanvas(); // Redessine la règle avec la nouvelle longueur
+        }
     });
 
     // --- Gestion des événements du Canvas ---
@@ -286,35 +325,57 @@ document.addEventListener('DOMContentLoaded', () => {
         const y = event.offsetY;
         const mousePos = { x, y };
 
-        if (currentTool === 'ruler') {
+        // --- Priority 1: Check for interaction with persistent tools ---
+
+        // Check for ruler interaction
+        const rulerHit = ruler.getRulerHit(mousePos, rulerState);
+        if (rulerHit) {
             const result = ruler.handleMouseDown(mousePos, rulerState, rulerDragStart);
             isDraggingRuler = result.isDragging;
             rulerDragMode = result.dragMode;
-        } else if (currentTool === 'compass') {
+            return; // Interaction handled.
+        }
+
+        // Check for compass interaction
+        const compassHit = compass.getCompassHit(mousePos, compassState);
+        if (compassHit) {
             const result = compass.handleMouseDown(mousePos, compassState, compassDragStart, arcState);
             isDraggingCompass = result.isDragging;
             compassDragMode = result.dragMode;
-        } else if (currentTool === 'point') {
-            saveState(); // Sauvegarde l'état AVANT d'ajouter la forme
-            pointNameCounter++; // Incrémente le compteur de points
-            const name = getPointName(pointNameCounter);
-            shapes.push({ type: 'point', x, y, name, color: currentColor }); // Ajoute le nom et la couleur
-            redrawCanvas();
-        } else if (currentTool === 'line') {
-            if (!isDrawingLine) {
-                // Premier clic : on commence la ligne
-                isDrawingLine = true;
-                lineStartPoint = { x, y };
-                // Pas de sauvegarde ici, l'action n'est pas terminée
-            } else {
-                // Deuxième clic : on termine la ligne
-                saveState(); // Sauvegarde l'état AVANT d'ajouter la forme
-                shapes.push({ type: 'line', x1: lineStartPoint.x, y1: lineStartPoint.y, x2: x, y2: y, color: currentColor });
-                isDrawingLine = false;
-                lineStartPoint = null;
-                currentMousePos = null; // Nettoie la position de la souris
+            return; // Interaction handled.
+        }
+
+        // --- Priority 2: Perform action of the currently selected tool ---
+        switch (currentTool) {
+            case 'point':
+                saveState();
+                pointNameCounter++;
+                const name = getPointName(pointNameCounter);
+                shapes.push({ type: 'point', x, y, name, color: currentColor });
                 redrawCanvas();
-            }
+                break;
+            case 'line':
+                if (!isDrawingLine) {
+                    isDrawingLine = true;
+                    lineStartPoint = { x, y };
+                } else {
+                    saveState();
+                    shapes.push({ type: 'line', x1: lineStartPoint.x, y1: lineStartPoint.y, x2: x, y2: y, color: currentColor });
+                    isDrawingLine = false;
+                    lineStartPoint = null;
+                    currentMousePos = null;
+                    redrawCanvas();
+                }
+                break;
+            case 'compass':
+                // This is ONLY for placing the compass.
+                const result = compass.handleMouseDown(mousePos, compassState, compassDragStart, arcState);
+                isDraggingCompass = result.isDragging;
+                compassDragMode = result.dragMode;
+                // After starting to place, we are no longer in "placement mode".
+                currentTool = null;
+                updateToolButtons();
+                break;
         }
     });
 

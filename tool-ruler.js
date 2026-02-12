@@ -1,35 +1,37 @@
 // tool-ruler.js
 
+const PIXELS_PER_CM = 37.8; // Constante pour un écran à 96 DPI
+const RULER_MARGIN = 5; // 5 pixels de marge avant le '0'
+
 /**
  * Détermine sur quelle partie de la règle l'utilisateur a cliqué.
  */
 export function getRulerHit(pos, rulerState) {
     if (!rulerState.visible) return null;
 
-    const { x, y, width, height, angle } = rulerState;
-    const centerX = x + width / 2;
-    const centerY = y + height / 2;
+    const contentWidth = rulerState.maxLengthCm * PIXELS_PER_CM;
+    const { zeroX, zeroY, height, angle } = rulerState;
 
-    // Traduit la position de la souris pour qu'elle soit relative au centre de la règle
-    const dx = pos.x - centerX;
-    const dy = pos.y - centerY;
+    // Translate mouse position to be relative to the ruler's '0' mark on the graduated edge
+    const dx = pos.x - zeroX;
+    const dy = pos.y - zeroY;
 
-    // Fait une rotation inverse de la position de la souris pour l'aligner avec la règle non pivotée
+    // Inverse rotate the mouse position
     const cos = Math.cos(-angle);
     const sin = Math.sin(-angle);
     const localX = dx * cos - dy * sin;
     const localY = dx * sin + dy * cos;
 
-    // Zone de détection pour la rotation aux extrémités
+    // Define handle zones
     const handleZoneWidth = 40;
 
-    // Vérifie si le clic est dans le corps de la règle
-    if (localX >= -width / 2 && localX <= width / 2 && localY >= -height / 2 && localY <= height / 2) {
-        // Si le clic est dans une zone d'extrémité, c'est pour la rotation
-        if (localX < -width / 2 + handleZoneWidth || localX > width / 2 - handleZoneWidth) {
+    // Check if the click is within the ruler's body, which extends from -MARGIN to contentWidth, and from 0 to height
+    if (localX >= -RULER_MARGIN && localX <= contentWidth && localY >= 0 && localY <= height) {
+        // The far end is for rotating
+        if (localX > contentWidth - handleZoneWidth) {
             return 'rotating';
         }
-        // Sinon, c'est pour le déplacement
+        // The rest of the body is for moving
         return 'moving';
     }
     return null;
@@ -38,53 +40,50 @@ export function getRulerHit(pos, rulerState) {
 export function drawRuler(ctx, rulerState) {
     if (!rulerState.visible) return;
 
-    const { x, y, width, height, angle } = rulerState;
+    const contentWidth = rulerState.maxLengthCm * PIXELS_PER_CM;
+    const width = contentWidth + RULER_MARGIN;
+    const { zeroX, zeroY, height, angle } = rulerState;
 
     ctx.save();
-    // Se place au centre de la règle pour la rotation
-    ctx.translate(x + width / 2, y + height / 2);
+    // Translate to the '0' mark on the graduated edge and rotate
+    ctx.translate(zeroX, zeroY);
     ctx.rotate(angle);
 
-    // Dessine le corps de la règle
+    // Dessine le corps de la règle (from -MARGIN to contentWidth, and from 0 to height)
     ctx.fillStyle = 'rgba(255, 229, 180, 0.85)'; // Couleur bois/papier avec transparence
     ctx.strokeStyle = '#8B4513'; // Marron foncé pour le contour
     ctx.lineWidth = 1;
-    ctx.fillRect(-width / 2, -height / 2, width, height);
-    ctx.strokeRect(-width / 2, -height / 2, width, height);
+    ctx.fillRect(-RULER_MARGIN, 0, width, height);
+    ctx.strokeRect(-RULER_MARGIN, 0, width, height);
 
     // Dessine les graduations
-    const PIXELS_PER_CM = 37.8; // Constante pour un écran à 96 DPI
     ctx.strokeStyle = '#000000';
     ctx.fillStyle = '#000000';
     ctx.font = '10px sans-serif';
     ctx.textAlign = 'center';
 
-    for (let px = 0; px <= width; px += (PIXELS_PER_CM / 10)) {
-        // On part du bord gauche de la règle (-width / 2)
-        const currentX = px - width / 2;
-        const cm = px / PIXELS_PER_CM;
+    // Itérer sur les millimètres
+    const totalMillimeters = Math.floor(rulerState.maxLengthCm * 10);
+    for (let mm = 0; mm <= totalMillimeters; mm++) {
+        const currentX = mm * (PIXELS_PER_CM / 10); // currentX is now the pixel offset from the '0' mark
         let tickHeight = 0;
 
-        if (cm % 1 === 0) { // Marque du centimètre
+        if (mm % 10 === 0) { // Marque du centimètre
             tickHeight = 20;
+            const cm = mm / 10;
             // Affiche le numéro du cm
-            if (cm > 0 && cm < width / PIXELS_PER_CM) {
-                ctx.fillText(Math.round(cm), currentX, -height / 2 + 30);
-            }
-        } else if (cm % 0.5 === 0) { // Marque du demi-centimètre
+            ctx.fillText(cm, currentX, 30);
+        } else if (mm % 5 === 0) { // Marque du demi-centimètre
             tickHeight = 15;
         } else { // Marque du millimètre
             tickHeight = 10;
         }
 
         ctx.beginPath();
-        ctx.moveTo(currentX, -height / 2);
-        ctx.lineTo(currentX, -height / 2 + tickHeight);
+        ctx.moveTo(currentX, 0);
+        ctx.lineTo(currentX, tickHeight);
         ctx.stroke();
     }
-
-    // Affiche "0" au début de la règle
-    ctx.fillText('0', -width / 2, -height / 2 + 30);
 
     ctx.restore();
 }
@@ -97,28 +96,24 @@ export function handleMouseDown(mousePos, rulerState, rulerDragStart) {
         isDragging = true;
         dragMode = hit;
         if (hit === 'moving') {
-            rulerDragStart.dx = mousePos.x - rulerState.x;
-            rulerDragStart.dy = mousePos.y - rulerState.y;
+            rulerDragStart.dx = mousePos.x - rulerState.zeroX;
+            rulerDragStart.dy = mousePos.y - rulerState.zeroY;
         } else if (hit === 'rotating') {
-            const centerX = rulerState.x + rulerState.width / 2;
-            const centerY = rulerState.y + rulerState.height / 2;
             rulerDragStart.angle = rulerState.angle;
-            rulerDragStart.mouseAngle = Math.atan2(mousePos.y - centerY, mousePos.x - centerX);
+            rulerDragStart.mouseAngle = Math.atan2(mousePos.y - rulerState.zeroY, mousePos.x - rulerState.zeroX);
         }
     }
     return { isDragging, dragMode };
 }
 
 export function handleMouseMove(currentMousePos, rulerState, rulerDragMode, rulerDragStart) {
-    const centerX = rulerState.x + rulerState.width / 2;
-    const centerY = rulerState.y + rulerState.height / 2;
     switch (rulerDragMode) {
         case 'moving':
-            rulerState.x = currentMousePos.x - rulerDragStart.dx;
-            rulerState.y = currentMousePos.y - rulerDragStart.dy;
+            rulerState.zeroX = currentMousePos.x - rulerDragStart.dx;
+            rulerState.zeroY = currentMousePos.y - rulerDragStart.dy;
             break;
         case 'rotating':
-            const currentMouseAngle = Math.atan2(currentMousePos.y - centerY, currentMousePos.x - centerX);
+            const currentMouseAngle = Math.atan2(currentMousePos.y - rulerState.zeroY, currentMousePos.x - rulerState.zeroX);
             const angleDelta = currentMouseAngle - rulerDragStart.mouseAngle;
             rulerState.angle = rulerDragStart.angle + angleDelta;
             break;
