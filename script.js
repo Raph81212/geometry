@@ -15,6 +15,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const fileLoader = document.getElementById('file-loader');
     const undoButton = document.getElementById('btn-undo');
     const redoButton = document.getElementById('btn-redo');
+    const recordButton = document.getElementById('btn-record');
+    const playButton = document.getElementById('btn-play');
     const colorPicker = document.getElementById('color-picker');
     const rulerOptions = document.getElementById('ruler-options');
     const rulerLengthInput = document.getElementById('ruler-length');
@@ -65,8 +67,25 @@ document.addEventListener('DOMContentLoaded', () => {
     let protractorDragMode = null; // 'moving', 'rotating'
     let protractorDragStart = {};
 
+    // --- État de l'enregistrement ---
+    let isRecording = false;
+    let isReplaying = false;
+    let recording = [];
+    let replayTimeoutId = null;
+    let recordingStartTime = 0;
+
     let arcState = { startAngle: 0, endAngle: 0 };
     let currentMousePos = null; // Pour le dessin en temps réel
+
+    // --- Helper for recording ---
+    function recordEvent(type, data) {
+        if (!isRecording) return;
+        recording.push({
+            type: type,
+            data: data,
+            timestamp: Date.now() - recordingStartTime
+        });
+    }
 
     // --- Fonctions de dessin ---
 
@@ -304,7 +323,7 @@ document.addEventListener('DOMContentLoaded', () => {
      * Définit l'outil actif et met à jour l'apparence des boutons.
      * @param {string} toolName - Le nom de l'outil ('point', 'line').
      */
-    function setActiveTool(toolName) {
+    function executeSetActiveTool(toolName) {
         // --- Handle Toggling Persistent Tools ---
         if (toolName === 'ruler') {
             rulerState.visible = !rulerState.visible;
@@ -343,47 +362,68 @@ document.addEventListener('DOMContentLoaded', () => {
         redrawCanvas();
     }
 
-    // Ajoute les écouteurs d'événements aux boutons d'outils
-    toolButtons.forEach(button => {
-        button.addEventListener('click', () => {
-            // Extrait le nom de l'outil depuis l'ID du bouton (ex: "tool-point" -> "point")
-            const toolName = button.id.split('-')[1];
-            setActiveTool(toolName);
-        });
-    });
-
-    rulerLengthInput.addEventListener('input', (e) => {
-        const newLength = parseInt(e.target.value, 10);
+    function executeRulerLengthChange(newLength) {
         if (!isNaN(newLength) && newLength > 0) {
             rulerState.maxLengthCm = newLength;
             redrawCanvas(); // Redessine la règle avec la nouvelle longueur
         }
+    }
+
+    // Ajoute les écouteurs d'événements aux boutons d'outils
+    toolButtons.forEach(button => {
+        button.addEventListener('click', () => {
+            if (isReplaying) return;
+            // Extrait le nom de l'outil depuis l'ID du bouton (ex: "tool-point" -> "point")
+            const toolName = button.id.split('-')[1];
+            recordEvent('tool_select', { toolName });
+            executeSetActiveTool(toolName);
+        });
+    });
+
+    rulerLengthInput.addEventListener('input', (e) => {
+        if (isReplaying) return;
+        const newLength = parseInt(e.target.value, 10);
+        recordEvent('ruler_length_change', { length: newLength });
+        executeRulerLengthChange(newLength);
     });
 
     // --- Gestion des événements du Canvas ---
 
     canvas.addEventListener('mousemove', (event) => {
-        currentMousePos = { x: event.offsetX, y: event.offsetY };
+        const mousePos = { x: event.offsetX, y: event.offsetY };
 
+        if (isReplaying) return;
+        recordEvent('mousemove', { pos: mousePos });
+        executeMouseMove(mousePos);
+    });
+
+    function executeMouseMove(mousePos) {
+        currentMousePos = mousePos; // Mettre à jour l'état global pour le dessin des lignes temporaires
         if (isDraggingCompass) {
-            compass.handleMouseMove(currentMousePos, compassState, compassDragMode, compassDragStart, arcState);
+            compass.handleMouseMove(mousePos, compassState, compassDragMode, compassDragStart, arcState);
             redrawCanvas();
         } else if (isDraggingRuler) {
-            ruler.handleMouseMove(currentMousePos, rulerState, rulerDragMode, rulerDragStart);
+            ruler.handleMouseMove(mousePos, rulerState, rulerDragMode, rulerDragStart);
             redrawCanvas();
         } else if (isDraggingProtractor) {
-            protractor.handleMouseMove(currentMousePos, protractorState, protractorDragMode, protractorDragStart);
+            protractor.handleMouseMove(mousePos, protractorState, protractorDragMode, protractorDragStart);
             redrawCanvas();
         } else if (isDrawingLine) {
             redrawCanvas();
         }
-    });
+    }
 
     canvas.addEventListener('mousedown', (event) => {
         const x = event.offsetX;
         const y = event.offsetY;
         const mousePos = { x, y };
 
+        if (isReplaying) return;
+        recordEvent('mousedown', { pos: mousePos });
+        executeMouseDown(mousePos);
+    });
+
+    function executeMouseDown(mousePos) {
         // --- Priority 1: Check for interaction with persistent tools ---
 
         // Check for ruler interaction
@@ -419,16 +459,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 saveState();
                 pointNameCounter++;
                 const name = getPointName(pointNameCounter);
-                shapes.push({ type: 'point', x, y, name, color: currentColor });
+                shapes.push({ type: 'point', x: mousePos.x, y: mousePos.y, name, color: currentColor });
                 redrawCanvas();
                 break;
             case 'line':
                 if (!isDrawingLine) {
                     isDrawingLine = true;
-                    lineStartPoint = { x, y };
+                    lineStartPoint = { x: mousePos.x, y: mousePos.y };
                 } else {
                     saveState();
-                    shapes.push({ type: 'line', x1: lineStartPoint.x, y1: lineStartPoint.y, x2: x, y2: y, color: currentColor });
+                    shapes.push({ type: 'line', x1: lineStartPoint.x, y1: lineStartPoint.y, x2: mousePos.x, y2: mousePos.y, color: currentColor });
                     isDrawingLine = false;
                     lineStartPoint = null;
                     currentMousePos = null;
@@ -445,9 +485,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 updateToolButtons();
                 break;
         }
-    });
+    }
 
     canvas.addEventListener('mouseup', (event) => {
+        if (isReplaying) return;
+        const mousePos = { x: event.offsetX, y: event.offsetY };
+        recordEvent('mouseup', { pos: mousePos });
+        executeMouseUp(mousePos);
+    });
+
+    function executeMouseUp(mousePos) {
         if (isDraggingCompass) {
             compass.handleMouseUp(compassDragMode, arcState, compassState, shapes, saveState);
             isDraggingCompass = false;
@@ -462,7 +509,7 @@ document.addEventListener('DOMContentLoaded', () => {
             isDraggingProtractor = false;
             protractorDragMode = null;
         }
-    });
+    }
 
     // --- Logique de Sauvegarde / Chargement / Effacement ---
 
@@ -581,6 +628,120 @@ document.addEventListener('DOMContentLoaded', () => {
         // Réinitialise l'input pour pouvoir recharger le même fichier
         event.target.value = '';
     });
+
+    // --- Logique d'enregistrement et de relecture ---
+
+    recordButton.addEventListener('click', () => {
+        isRecording = !isRecording;
+        if (isRecording) {
+            // Start recording
+            recording = [];
+            recordingStartTime = Date.now();
+            recordButton.textContent = '⏹️ Arrêter';
+            recordButton.classList.add('recording');
+            playButton.disabled = true; // Disable play while recording
+        } else {
+            // Stop recording
+            recordButton.textContent = '⏺️ Enregistrer';
+            recordButton.classList.remove('recording');
+            if (recording.length > 0) {
+                playButton.disabled = false;
+            }
+        }
+    });
+
+    playButton.addEventListener('click', () => {
+        if (isReplaying) {
+            stopReplay();
+        } else if (recording.length > 0 && !isRecording) {
+            startReplay();
+        }
+    });
+
+    function startReplay() {
+        isReplaying = true;
+        // Disable UI, but keep play/stop button active
+        document.querySelectorAll('#toolbar button, #toolbar input').forEach(el => {
+            if (el.id !== 'btn-play') {
+                el.disabled = true;
+            }
+        });
+        playButton.textContent = '⏹️ Arrêter';
+        playButton.disabled = false;
+
+        // Reset state for replay
+        shapes = [];
+        pointNameCounter = 0;
+        compassState = { center: null, pencil: null, radius: 0, };
+        rulerState = {
+            visible: false,
+            zeroX: 150,
+            zeroY: 200,
+            maxLengthCm: 10,
+            height: 50,
+            angle: 0,
+        };
+        protractorState = {
+            visible: false,
+            centerX: 400,
+            centerY: 300,
+            radius: 150,
+            angle: 0,
+        };
+        rulerLengthInput.value = 10; // Reset ruler length input
+
+        currentTool = null;
+        isDrawingLine = false;
+        updateToolButtons();
+        redrawCanvas();
+
+        replayNextEvent(0);
+    }
+
+    function stopReplay() {
+        if (replayTimeoutId) {
+            clearTimeout(replayTimeoutId);
+            replayTimeoutId = null;
+        }
+        isReplaying = false;
+        // Re-enable UI
+        document.querySelectorAll('#toolbar button, #toolbar input').forEach(el => el.disabled = false);
+        playButton.textContent = '▶️ Relire';
+        playButton.disabled = (recording.length === 0);
+        // Also re-check record button state
+        recordButton.disabled = false;
+        console.log("Replay stopped by user.");
+    }
+
+    function replayNextEvent(index) {
+        if (index >= recording.length) {
+            // Replay finished
+            isReplaying = false;
+            // Re-enable UI
+            document.querySelectorAll('#toolbar button, #toolbar input').forEach(el => el.disabled = false);
+            playButton.textContent = '▶️ Relire';
+            playButton.disabled = (recording.length === 0);
+            console.log("Replay finished.");
+            return;
+        }
+
+        const event = recording[index];
+        const nextEvent = recording[index + 1];
+        const delay = nextEvent ? (nextEvent.timestamp - event.timestamp) : 0;
+
+        // Simulate the event
+        switch (event.type) {
+            case 'tool_select':         executeSetActiveTool(event.data.toolName); break;
+            case 'mousedown':           executeMouseDown(event.data.pos); break;
+            case 'mousemove':           executeMouseMove(event.data.pos); break;
+            case 'mouseup':             executeMouseUp(event.data.pos); break;
+            case 'ruler_length_change': executeRulerLengthChange(event.data.length); break;
+        }
+
+        replayTimeoutId = setTimeout(() => {
+            replayNextEvent(index + 1);
+        }, delay);
+    }
 
     // --- Écouteurs d'événements pour l'historique ---
 

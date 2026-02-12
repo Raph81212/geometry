@@ -66,6 +66,13 @@ button:hover {
     border-color: #0056b3;
 }
 
+/* Style for the record button when recording */
+#btn-record.recording {
+    background-color: #dc3545; /* Red */
+    color: white;
+    border-color: #bd2130;
+}
+
 .tool-options {
     display: none; /* Caché par défaut */
     align-items: center;
