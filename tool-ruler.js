@@ -106,11 +106,45 @@ export function handleMouseDown(mousePos, rulerState, rulerDragStart) {
     return { isDragging, dragMode };
 }
 
-export function handleMouseMove(currentMousePos, rulerState, rulerDragMode, rulerDragStart) {
+export function handleMouseMove(currentMousePos, rulerState, rulerDragMode, rulerDragStart, shapes, snap) {
+    let snapResult = { snapped: false };
     switch (rulerDragMode) {
         case 'moving':
-            rulerState.zeroX = currentMousePos.x - rulerDragStart.dx;
-            rulerState.zeroY = currentMousePos.y - rulerDragStart.dy;
+            const potentialZeroX = currentMousePos.x - rulerDragStart.dx;
+            const potentialZeroY = currentMousePos.y - rulerDragStart.dy;
+
+            // Essaye de magnétiser
+            if (snap && shapes) {
+                snapResult = snap.getSnap({ x: potentialZeroX, y: potentialZeroY }, shapes);
+            }
+
+            if (snapResult.snapped) {
+                if (snapResult.type === 'line') {
+                    const finalAngle = snapResult.angle;
+                    rulerState.angle = finalAngle;
+                    let finalX = snapResult.position.x;
+                    let finalY = snapResult.position.y;
+
+                    // side < 0 signifie que le curseur est "au-dessus" de la ligne.
+                    // Pour magnétiser le corps de la règle au-dessus, son origine (bord supérieur) doit être décalée "vers le haut".
+                    // Le vecteur "haut" local de la règle est (-sin(angle), cos(angle)).
+                    if (snapResult.side < 0) {
+                        const shiftX = -rulerState.height * Math.sin(finalAngle);
+                        const shiftY =  rulerState.height * Math.cos(finalAngle);
+                        finalX += shiftX;
+                        finalY += shiftY;
+                    }
+                    rulerState.zeroX = finalX;
+                    rulerState.zeroY = finalY;
+                } else if (snapResult.type === 'point') {
+                    // Magnétise sur le point : met à jour la position, garde l'angle
+                    rulerState.zeroX = snapResult.position.x;
+                    rulerState.zeroY = snapResult.position.y;
+                }
+            } else {
+                rulerState.zeroX = potentialZeroX;
+                rulerState.zeroY = potentialZeroY;
+            }
             break;
         case 'rotating':
             const currentMouseAngle = Math.atan2(currentMousePos.y - rulerState.zeroY, currentMousePos.x - rulerState.zeroX);
@@ -118,4 +152,5 @@ export function handleMouseMove(currentMousePos, rulerState, rulerDragMode, rule
             rulerState.angle = rulerDragStart.angle + angleDelta;
             break;
     }
+    return snapResult;
 }

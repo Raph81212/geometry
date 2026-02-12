@@ -2,6 +2,7 @@ import * as compass from './tool-compass.js';
 import * as ruler from './tool-ruler.js';
 import * as protractor from './tool-protractor.js';
 import * as setsquare from './tool-setsquare.js';
+import * as snap from './snap.js';
 
 document.addEventListener('DOMContentLoaded', () => {
     // --- Initialisation ---
@@ -93,6 +94,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     let arcState = { startAngle: 0, endAngle: 0 };
     let currentMousePos = null; // Pour le dessin en temps réel
+    let snapInfo = null; // Pour magnétiser les outils
 
     // --- Helper for recording ---
     function recordEvent(type, data) {
@@ -140,6 +142,28 @@ document.addEventListener('DOMContentLoaded', () => {
      */
     function redrawCanvas() {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        // Dessine un surlignage pour la ligne/point magnétisé(e)
+        if (snapInfo && snapInfo.snapped) {
+            ctx.save();
+            if (snapInfo.type === 'line') {
+                const line = snapInfo.snappedShape;
+                ctx.beginPath();
+                ctx.moveTo(line.x1, line.y1);
+                ctx.lineTo(line.x2, line.y2);
+                ctx.strokeStyle = 'rgba(255, 0, 255, 0.7)'; // Surlignage magenta
+                ctx.lineWidth = 6;
+                ctx.stroke();
+            } else if (snapInfo.type === 'point') {
+                const point = snapInfo.snappedShape;
+                ctx.beginPath();
+                ctx.arc(point.x, point.y, 10, 0, 2 * Math.PI); // Cercle de surlignage
+                ctx.strokeStyle = 'rgba(255, 0, 255, 0.7)';
+                ctx.lineWidth = 3;
+                ctx.stroke();
+            }
+            ctx.restore();
+        }
 
         shapes.forEach(shape => {
             if (shape.type === 'point') {
@@ -430,17 +454,19 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function executeMouseMove(mousePos) {
         currentMousePos = mousePos; // Mettre à jour l'état global pour le dessin des lignes temporaires
+        snapInfo = null; // Réinitialise à chaque mouvement
+
         if (isDraggingCompass) {
             compass.handleMouseMove(mousePos, compassState, compassDragMode, compassDragStart, arcState);
             redrawCanvas();
         } else if (isDraggingRuler) {
-            ruler.handleMouseMove(mousePos, rulerState, rulerDragMode, rulerDragStart);
+            snapInfo = ruler.handleMouseMove(mousePos, rulerState, rulerDragMode, rulerDragStart, shapes, snap);
             redrawCanvas();
         } else if (isDraggingProtractor) {
             protractor.handleMouseMove(mousePos, protractorState, protractorDragMode, protractorDragStart);
             redrawCanvas();
         } else if (isDraggingSetSquare) {
-            setsquare.handleMouseMove(mousePos, setSquareState, setSquareDragMode, setSquareDragStart);
+            snapInfo = setsquare.handleMouseMove(mousePos, setSquareState, setSquareDragMode, setSquareDragStart, shapes, snap);
             redrawCanvas();
         } else if (isDrawingLine) {
             redrawCanvas();
@@ -490,7 +516,9 @@ document.addEventListener('DOMContentLoaded', () => {
         // Check for set square interaction
         const setSquareHit = setsquare.getSetSquareHit(mousePos, setSquareState);
         if (setSquareHit) {
-            const result = setsquare.handleMouseDown(mousePos, setSquareState, setSquareDragStart);
+            // If we are about to interact with the set square, check its current snap status
+            const currentSnapInfo = snap.getSnap({ x: setSquareState.cornerX, y: setSquareState.cornerY }, shapes);
+            const result = setsquare.handleMouseDown(mousePos, setSquareState, setSquareDragStart, currentSnapInfo);
             isDraggingSetSquare = result.isDragging;
             setSquareDragMode = result.dragMode;
             return; // Interaction handled.
@@ -538,24 +566,36 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     function executeMouseUp(mousePos) {
+        let needsRedraw = false;
+
         if (isDraggingCompass) {
             compass.handleMouseUp(compassDragMode, arcState, compassState, shapes, saveState);
             isDraggingCompass = false;
             compassDragMode = null;
-            redrawCanvas();
+            needsRedraw = true;
         }
         if (isDraggingRuler) {
             isDraggingRuler = false;
             rulerDragMode = null;
+            needsRedraw = true;
         }
         if (isDraggingProtractor) {
             isDraggingProtractor = false;
             protractorDragMode = null;
+            needsRedraw = true;
         }
         if (isDraggingSetSquare) {
             isDraggingSetSquare = false;
             setSquareDragMode = null;
+            needsRedraw = true;
         }
+
+        if (snapInfo) {
+            snapInfo = null;
+            needsRedraw = true;
+        }
+
+        if (needsRedraw) redrawCanvas();
     }
 
     // --- Logique de Sauvegarde / Chargement / Effacement ---

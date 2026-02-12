@@ -144,7 +144,7 @@ export function drawSetSquare(ctx, setSquareState) {
 /**
  * Gère l'événement mousedown sur l'équerre.
  */
-export function handleMouseDown(mousePos, setSquareState, setSquareDragStart) {
+export function handleMouseDown(mousePos, setSquareState, setSquareDragStart, snapInfo) {
     const hit = getSetSquareHit(mousePos, setSquareState);
     if (!hit) return { isDragging: false, dragMode: null };
 
@@ -154,22 +154,74 @@ export function handleMouseDown(mousePos, setSquareState, setSquareDragStart) {
         setSquareDragStart.angle = setSquareState.angle;
         setSquareDragStart.mouseAngle = Math.atan2(mousePos.y - setSquareState.cornerY, mousePos.x - setSquareState.cornerX);
     }
+    // Mémorise l'état de magnétisation au début du glissement
+    setSquareDragStart.snapAtDragStart = (snapInfo && snapInfo.snapped) ? snapInfo : null;
+
     return { isDragging: true, dragMode: hit };
 }
 
 /**
  * Gère l'événement mousemove pour l'équerre.
  */
-export function handleMouseMove(currentMousePos, setSquareState, setSquareDragMode, setSquareDragStart) {
-    if (setSquareDragMode === 'rotating') {
+export function handleMouseMove(currentMousePos, setSquareState, setSquareDragMode, setSquareDragStart, shapes, snap) {
+    let snapResult = { snapped: false };
+
+    if (setSquareDragMode === 'moving') {
+        const potentialCornerX = currentMousePos.x - setSquareDragStart.dx;
+        const potentialCornerY = currentMousePos.y - setSquareDragStart.dy;
+
+        if (snap && shapes) {
+            snapResult = snap.getSnap({ x: potentialCornerX, y: potentialCornerY }, shapes);
+        }
+
+        if (snapResult.snapped) {
+            if (snapResult.type === 'line') {
+                let finalAngle = snapResult.angle;
+                // side < 0 signifie que le curseur est "au-dessus" de la ligne. On retourne l'équerre.
+                if (snapResult.side < 0) {
+                    finalAngle += Math.PI;
+                }
+                setSquareState.angle = finalAngle;
+                setSquareState.cornerX = snapResult.position.x;
+                setSquareState.cornerY = snapResult.position.y;
+            } else if (snapResult.type === 'point') {
+                // Magnétise sur le point : met à jour la position, garde l'angle
+                setSquareState.cornerX = snapResult.position.x;
+                setSquareState.cornerY = snapResult.position.y;
+            }
+        } else {
+            setSquareState.cornerX = potentialCornerX;
+            setSquareState.cornerY = potentialCornerY;
+        }
+    } else if (setSquareDragMode === 'rotating') {
         const currentMouseAngle = Math.atan2(currentMousePos.y - setSquareState.cornerY, currentMousePos.x - setSquareState.cornerX);
         const angleDelta = currentMouseAngle - setSquareDragStart.mouseAngle;
         setSquareState.angle = setSquareDragStart.angle + angleDelta;
     } else if (setSquareDragMode === 'horizontal-moving') {
-        setSquareState.cornerX = currentMousePos.x - setSquareDragStart.dx;
-        // setSquareState.cornerY reste inchangé
-    } else if (setSquareDragMode === 'moving') {
-        setSquareState.cornerX = currentMousePos.x - setSquareDragStart.dx;
-        setSquareState.cornerY = currentMousePos.y - setSquareDragStart.dy;
+        if (setSquareDragStart.snapAtDragStart && setSquareDragStart.snapAtDragStart.type === 'line') {
+            // L'équerre est magnétisée : on glisse le long de la ligne
+            const snappedLine = setSquareDragStart.snapAtDragStart.snappedShape;
+            const potentialPos = {
+                x: currentMousePos.x - setSquareDragStart.dx,
+                y: currentMousePos.y - setSquareDragStart.dy
+            };
+
+            // Projette la position potentielle sur la ligne magnétisée
+            const l1 = { x: snappedLine.x1, y: snappedLine.y1 };
+            const dx = snappedLine.x2 - snappedLine.x1;
+            const dy = snappedLine.y2 - snappedLine.y1;
+            const lineLengthSq = dx * dx + dy * dy;
+
+            if (lineLengthSq > 0) {
+                const t = ((potentialPos.x - l1.x) * dx + (potentialPos.y - l1.y) * dy) / lineLengthSq;
+                const snappedPosition = { x: l1.x + t * dx, y: l1.y + t * dy };
+                
+                setSquareState.cornerX = snappedPosition.x;
+                setSquareState.cornerY = snappedPosition.y;
+            }
+            snapResult = setSquareDragStart.snapAtDragStart;
+        }
     }
+
+    return snapResult;
 }
