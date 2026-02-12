@@ -1,5 +1,6 @@
 import * as compass from './tool-compass.js';
 import * as ruler from './tool-ruler.js';
+import * as protractor from './tool-protractor.js';
 
 document.addEventListener('DOMContentLoaded', () => {
     // --- Initialisation ---
@@ -51,6 +52,18 @@ document.addEventListener('DOMContentLoaded', () => {
     let isDraggingRuler = false;
     let rulerDragMode = null; // 'moving', 'rotating'
     let rulerDragStart = {};
+
+    // --- État du rapporteur persistant ---
+    let protractorState = {
+        visible: false,
+        centerX: 400,
+        centerY: 300,
+        radius: 150,
+        angle: 0, // in radians
+    };
+    let isDraggingProtractor = false;
+    let protractorDragMode = null; // 'moving', 'rotating'
+    let protractorDragStart = {};
 
     let arcState = { startAngle: 0, endAngle: 0 };
     let currentMousePos = null; // Pour le dessin en temps réel
@@ -131,6 +144,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Dessine la règle si elle est visible, indépendamment du compas
         ruler.drawRuler(ctx, rulerState);
+
+        // Dessine le rapporteur s'il est visible
+        protractor.drawProtractor(ctx, protractorState);
     }
 
     /**
@@ -233,6 +249,8 @@ document.addEventListener('DOMContentLoaded', () => {
             } else if (btnToolName === 'compass') {
                 // Active if it's on screen OR if we are in placement mode.
                 isActive = !!compassState.center || currentTool === 'compass';
+            } else if (btnToolName === 'protractor') {
+                isActive = protractorState.visible;
             } else {
                 // Active if it's the current tool.
                 isActive = currentTool === btnToolName;
@@ -257,6 +275,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (toolName === 'ruler') {
             rulerState.visible = !rulerState.visible;
             rulerOptions.style.display = rulerState.visible ? 'flex' : 'none';
+        } else if (toolName === 'protractor') {
+            protractorState.visible = !protractorState.visible;
         } else if (toolName === 'compass') {
             // If compass is on screen, remove it.
             if (compassState.center) {
@@ -280,6 +300,8 @@ document.addEventListener('DOMContentLoaded', () => {
         compassDragMode = null;
         isDraggingRuler = false;
         rulerDragMode = null;
+        isDraggingProtractor = false;
+        protractorDragMode = null;
 
         // --- Update UI ---
         updateToolButtons();
@@ -315,6 +337,9 @@ document.addEventListener('DOMContentLoaded', () => {
         } else if (isDraggingRuler) {
             ruler.handleMouseMove(currentMousePos, rulerState, rulerDragMode, rulerDragStart);
             redrawCanvas();
+        } else if (isDraggingProtractor) {
+            protractor.handleMouseMove(currentMousePos, protractorState, protractorDragMode, protractorDragStart);
+            redrawCanvas();
         } else if (isDrawingLine) {
             redrawCanvas();
         }
@@ -342,6 +367,15 @@ document.addEventListener('DOMContentLoaded', () => {
             const result = compass.handleMouseDown(mousePos, compassState, compassDragStart, arcState);
             isDraggingCompass = result.isDragging;
             compassDragMode = result.dragMode;
+            return; // Interaction handled.
+        }
+
+        // Check for protractor interaction
+        const protractorHit = protractor.getProtractorHit(mousePos, protractorState);
+        if (protractorHit) {
+            const result = protractor.handleMouseDown(mousePos, protractorState, protractorDragStart);
+            isDraggingProtractor = result.isDragging;
+            protractorDragMode = result.dragMode;
             return; // Interaction handled.
         }
 
@@ -390,6 +424,10 @@ document.addEventListener('DOMContentLoaded', () => {
             isDraggingRuler = false;
             rulerDragMode = null;
         }
+        if (isDraggingProtractor) {
+            isDraggingProtractor = false;
+            protractorDragMode = null;
+        }
     });
 
     // --- Logique de Sauvegarde / Chargement / Effacement ---
@@ -405,6 +443,7 @@ document.addEventListener('DOMContentLoaded', () => {
             isDrawingLine = false;
             compassState = { center: null, radius: 0, pencil: null }; // Efface aussi le compas
             rulerState.visible = false; // Cache la règle
+            protractorState.visible = false; // Cache le rapporteur
             redrawCanvas(); // redrawCanvas est appelé dans saveState via undo/redo
         }
     });
