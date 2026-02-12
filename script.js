@@ -215,8 +215,14 @@ document.addEventListener('DOMContentLoaded', () => {
      * Doit être appelée AVANT chaque modification.
      */
     function saveState() {
-        // On fait une copie complète pour ne pas sauvegarder une simple référence
-        undoStack.push(JSON.parse(JSON.stringify(shapes)));
+        const state = {
+            shapes: JSON.parse(JSON.stringify(shapes)),
+            pointNameCounter: pointNameCounter,
+            compassState: JSON.parse(JSON.stringify(compassState)),
+            rulerState: JSON.parse(JSON.stringify(rulerState)),
+            protractorState: JSON.parse(JSON.stringify(protractorState))
+        };
+        undoStack.push(state);
         // Dès qu'une nouvelle action est faite, l'historique "redo" n'est plus valide
         redoStack = [];
         updateHistoryButtons();
@@ -224,8 +230,22 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function undo() {
         if (undoStack.length > 0) {
-            redoStack.push(JSON.parse(JSON.stringify(shapes)));
-            shapes = undoStack.pop();
+            const currentState = {
+                shapes: JSON.parse(JSON.stringify(shapes)),
+                pointNameCounter: pointNameCounter,
+                compassState: JSON.parse(JSON.stringify(compassState)),
+                rulerState: JSON.parse(JSON.stringify(rulerState)),
+                protractorState: JSON.parse(JSON.stringify(protractorState))
+            };
+            redoStack.push(currentState);
+
+            const previousState = undoStack.pop();
+            shapes = previousState.shapes;
+            pointNameCounter = previousState.pointNameCounter;
+            compassState = previousState.compassState;
+            rulerState = previousState.rulerState;
+            protractorState = previousState.protractorState;
+
             redrawCanvas();
             updateHistoryButtons();
         }
@@ -233,8 +253,22 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function redo() {
         if (redoStack.length > 0) {
-            undoStack.push(JSON.parse(JSON.stringify(shapes)));
-            shapes = redoStack.pop();
+            const currentState = {
+                shapes: JSON.parse(JSON.stringify(shapes)),
+                pointNameCounter: pointNameCounter,
+                compassState: JSON.parse(JSON.stringify(compassState)),
+                rulerState: JSON.parse(JSON.stringify(rulerState)),
+                protractorState: JSON.parse(JSON.stringify(protractorState))
+            };
+            undoStack.push(currentState);
+
+            const nextState = redoStack.pop();
+            shapes = nextState.shapes;
+            pointNameCounter = nextState.pointNameCounter;
+            compassState = nextState.compassState;
+            rulerState = nextState.rulerState;
+            protractorState = nextState.protractorState;
+
             redrawCanvas();
             updateHistoryButtons();
         }
@@ -449,8 +483,25 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     saveButton.addEventListener('click', () => {
+        let filename = prompt("Nommez votre session de géométrie :", "session_geometrie");
+        if (!filename) {
+            return; // L'utilisateur a annulé
+        }
+        if (!filename.toLowerCase().endsWith('.json')) {
+            filename += '.json';
+        }
         // Convertit notre liste d'objets en une chaîne de caractères JSON
-        const data = JSON.stringify(shapes, null, 2);
+        const sessionData = {
+            currentState: {
+                shapes: shapes,
+                pointNameCounter: pointNameCounter,
+                compassState: compassState,
+                rulerState: rulerState,
+                protractorState: protractorState
+            },
+            history: undoStack
+        };
+        const data = JSON.stringify(sessionData, null, 2);
         // Crée un objet "Blob" qui représente les données
         const blob = new Blob([data], { type: 'application/json' });
         // Crée une URL temporaire pour le Blob
@@ -459,7 +510,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // Crée un lien de téléchargement invisible et le clique
         const a = document.createElement('a');
         a.href = url;
-        a.download = 'session_geometrie.json';
+        a.download = filename;
         a.click();
 
         // Libère l'URL temporaire
@@ -478,24 +529,47 @@ document.addEventListener('DOMContentLoaded', () => {
         const reader = new FileReader();
         reader.onload = (e) => {
             try {
-                const loadedShapes = JSON.parse(e.target.result);
-                // Valider que les données sont bien un tableau
-                if (Array.isArray(loadedShapes)) {
-                    saveState(); // Sauvegarde l'état actuel avant de charger
-                    shapes = loadedShapes;
+                const sessionData = JSON.parse(e.target.result);
+                // Valider que les données sont bien un objet avec les bonnes clés (nouveau format)
+                if (sessionData && sessionData.currentState && Array.isArray(sessionData.history)) {
+                    saveState(); // Sauvegarde l'état actuel pour pouvoir annuler le chargement
 
-                    // Met à jour le compteur de noms pour éviter les doublons
-                    const pointNames = shapes.filter(s => s.type === 'point' && s.name).map(p => p.name);
-                    if (pointNames.length > 0) {
-                        const maxPointNumber = Math.max(...pointNames.map(getPointNumber));
-                        pointNameCounter = maxPointNumber;
-                    } else {
-                        pointNameCounter = 0;
-                    }
+                    shapes = sessionData.currentState.shapes;
+                    pointNameCounter = sessionData.currentState.pointNameCounter;
+                    // Restore tool states, providing defaults if they don't exist in the save file
+                    compassState = sessionData.currentState.compassState || { center: null, pencil: null, radius: 0 };
+                    rulerState = sessionData.currentState.rulerState || { visible: false, zeroX: 150, zeroY: 200, maxLengthCm: 10, height: 50, angle: 0 };
+                    protractorState = sessionData.currentState.protractorState || { visible: false, centerX: 400, centerY: 300, radius: 150, angle: 0 };
+                    undoStack = sessionData.history;
+                    redoStack = []; // On vide la pile "redo" lors d'un chargement
 
+                    updateHistoryButtons();
                     redrawCanvas();
                 } else {
-                    alert("Le fichier n'est pas valide.");
+                    // Tente de charger l'ancien format pour la compatibilité (un simple tableau de formes)
+                    const loadedShapes = JSON.parse(e.target.result);
+                    if (Array.isArray(loadedShapes)) {
+                        saveState();
+                        shapes = loadedShapes;
+                        // Recalcule le compteur de points
+                        const pointNames = shapes.filter(s => s.type === 'point' && s.name).map(p => p.name);
+                        if (pointNames.length > 0) {
+                            pointNameCounter = Math.max(0, ...pointNames.map(getPointNumber));
+                        } else {
+                            pointNameCounter = 0;
+                        }
+                        undoStack = []; // Pas d'historique dans l'ancien format
+                        redoStack = [];
+                        // Reset tool states completely for old format
+                        compassState = { center: null, pencil: null, radius: 0 };
+                        rulerState = { visible: false, zeroX: 150, zeroY: 200, maxLengthCm: 10, height: 50, angle: 0 };
+                        protractorState = { visible: false, centerX: 400, centerY: 300, radius: 150, angle: 0 };
+                        updateHistoryButtons();
+                        redrawCanvas();
+                        alert("Fichier d'un ancien format chargé. L'historique de construction n'est pas disponible.");
+                    } else {
+                        alert("Le fichier n'est pas valide.");
+                    }
                 }
             } catch (error) {
                 alert("Erreur lors de la lecture du fichier. Assurez-vous que c'est un fichier JSON valide.");
