@@ -894,6 +894,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
         currentTool = null;
         isDrawingLine = false;
+
+        // Reset all dragging states to ensure a clean start
+        isDraggingCompass = false;
+        compassDragMode = null;
+        isDraggingRuler = false;
+        rulerDragMode = null;
+        isDraggingProtractor = false;
+        protractorDragMode = null;
+        isDraggingSetSquare = false;
+        setSquareDragMode = null;
+
         updateToolButtons();
         redrawCanvas();
 
