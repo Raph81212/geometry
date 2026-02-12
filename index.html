@@ -11,26 +11,39 @@
     <h1>Atelier de Géométrie</h1>
 
     <div id="toolbar">
-        <button id="tool-point" class="tool-btn">Point</button>
-        <button id="tool-line" class="tool-btn">Ligne</button>
-        <button id="tool-compass" class="tool-btn">Compas</button>
-        <button id="tool-ruler" class="tool-btn">Règle</button>
-        <div id="ruler-options" class="tool-options">
-            <label for="ruler-length">Longueur (cm):</label>
-            <input type="number" id="ruler-length" min="1" max="50" value="10" style="width: 50px;">
+        <div class="toolbar-row">
+            <button id="tool-point" class="tool-btn">Point</button>
+            <button id="tool-line" class="tool-btn">Ligne</button>
+            <button id="tool-compass" class="tool-btn">Compas</button>
+            <button id="tool-ruler" class="tool-btn">Règle</button>
+            <button id="tool-protractor" class="tool-btn">Rapporteur</button>
+            <div id="ruler-options" class="tool-options">
+                <label for="ruler-length">Longueur (cm):</label>
+                <input type="number" id="ruler-length" min="1" max="50" value="10" style="width: 50px;">
+            </div>
+            <div class="separator"></div>
+            <input type="color" id="color-picker" title="Choisir la couleur">
+            <div class="separator"></div>
+            <button id="btn-undo" title="Retour arrière (Ctrl+Z)">↶</button>
+            <button id="btn-redo" title="Retour avant (Ctrl+Y)">↷</button>
+            <div class="separator"></div>
+            <button id="btn-clear">Effacer</button>
+            <button id="btn-save">Sauvegarder</button>
+            <button id="btn-load">Charger</button>
         </div>
-        <div class="separator"></div>
-        <input type="color" id="color-picker" title="Choisir la couleur">
-        <!-- Les futurs outils viendront ici -->
-        <div class="separator"></div>
-        <button id="btn-undo" title="Retour arrière (Ctrl+Z)">↶</button>
-        <button id="btn-redo" title="Retour avant (Ctrl+Y)">↷</button>
-        <div class="separator"></div>
-        <button id="btn-clear">Effacer</button>
-        <button id="btn-save">Sauvegarder</button>
-        <button id="btn-load">Charger</button>
+        <div class="toolbar-row">
+            <button id="btn-record" title="Enregistrer la construction">⏺️ Enregistrer</button>
+            <button id="btn-play" title="Relire la construction" disabled>▶️ Relire</button>
+            <label for="replay-loop" style="user-select: none; display: inline-flex; align-items: center; gap: 4px;">
+                <input type="checkbox" id="replay-loop"> Boucle
+            </label>
+            <div class="separator"></div>
+            <button id="btn-save-recording" title="Sauvegarder le film" disabled>💾 Enregistrer film</button>
+            <button id="btn-load-recording" title="Charger un film">📂 Charger film</button>
+        </div>
         <!-- Input caché pour le chargement de fichier -->
         <input type="file" id="file-loader" accept=".json" style="display: none;">
+        <input type="file" id="recording-loader" accept=".json" style="display: none;">
     </div>
 
     <canvas id="drawing-canvas"></canvas>
