@@ -468,6 +468,32 @@ document.addEventListener('DOMContentLoaded', () => {
         currentMousePos = mousePos; // Mettre à jour l'état global pour le dessin des lignes temporaires
         snapInfo = null; // Réinitialise à chaque mouvement
 
+        // --- Logique de changement de curseur ---
+        let cursorIsPencil = false;
+
+        // On veut le curseur crayon si:
+        // 1. On est en train de tracer une ligne (soit libre, soit sur un outil).
+        if (isDrawingLine) {
+            cursorIsPencil = true;
+        }
+        // 2. Ou si on n'est pas en train de tracer/glisser, mais qu'on survole un bord de dessin.
+        else {
+            const noDragActive = !isDraggingRuler && !isDraggingSetSquare && !isDraggingProtractor && !isDraggingCompass;
+            if (noDragActive) {
+                if (ruler.getRulerHit(mousePos, rulerState) === 'drawing-edge') {
+                    cursorIsPencil = true;
+                } else {
+                    const setSquareHit = setsquare.getSetSquareHit(mousePos, setSquareState);
+                    if (setSquareHit && setSquareHit.startsWith('drawing-edge')) {
+                        cursorIsPencil = true;
+                    }
+                }
+            }
+        }
+
+        canvas.classList.toggle('pencil-cursor', cursorIsPencil);
+        // --- Fin de la logique de changement de curseur ---
+
         if (isDraggingCompass) {
             compass.handleMouseMove(mousePos, compassState, compassDragMode, compassDragStart, arcState);
             redrawCanvas();
