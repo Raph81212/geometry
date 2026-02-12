@@ -1,6 +1,8 @@
 import * as compass from './tool-compass.js';
 import * as ruler from './tool-ruler.js';
 import * as protractor from './tool-protractor.js';
+import * as setsquare from './tool-setsquare.js';
+import * as snap from './snap.js';
 
 document.addEventListener('DOMContentLoaded', () => {
     // --- Initialisation ---
@@ -36,6 +38,8 @@ document.addEventListener('DOMContentLoaded', () => {
     let currentTool = null;
     let isDrawingLine = false; // Pour gérer le dessin de ligne en 2 clics
     let lineStartPoint = null;
+    let isDrawingOnTool = false; // Pour tracer une ligne le long d'un outil
+    let toolDrawingInfo = null; // { tool: 'ruler'|'setsquare', startPos: {x,y}, edge?: 'h'|'v' }
     // --- État du compas persistant ---
     let compassState = {
         center: null, // {x, y} - La pointe
@@ -71,6 +75,18 @@ document.addEventListener('DOMContentLoaded', () => {
     let protractorDragMode = null; // 'moving', 'rotating'
     let protractorDragStart = {};
 
+    // --- État de l'équerre persistante ---
+    let setSquareState = {
+        visible: false,
+        cornerX: 200,
+        cornerY: 200,
+        size: 300, // Longueur des côtés de l'angle droit en pixels
+        angle: 0, // in radians
+    };
+    let isDraggingSetSquare = false;
+    let setSquareDragMode = null; // 'moving', 'rotating', 'horizontal-moving'
+    let setSquareDragStart = {};
+
     // --- État de l'enregistrement ---
     let isRecording = false;
     let isReplaying = false;
@@ -80,6 +96,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     let arcState = { startAngle: 0, endAngle: 0 };
     let currentMousePos = null; // Pour le dessin en temps réel
+    let snapInfo = null; // Pour magnétiser les outils
 
     // --- Helper for recording ---
     function recordEvent(type, data) {
@@ -128,6 +145,28 @@ document.addEventListener('DOMContentLoaded', () => {
     function redrawCanvas() {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
 
+        // Dessine un surlignage pour la ligne/point magnétisé(e)
+        if (snapInfo && snapInfo.snapped) {
+            ctx.save();
+            if (snapInfo.type === 'line') {
+                const line = snapInfo.snappedShape;
+                ctx.beginPath();
+                ctx.moveTo(line.x1, line.y1);
+                ctx.lineTo(line.x2, line.y2);
+                ctx.strokeStyle = 'rgba(255, 0, 255, 0.7)'; // Surlignage magenta
+                ctx.lineWidth = 6;
+                ctx.stroke();
+            } else if (snapInfo.type === 'point') {
+                const point = snapInfo.snappedShape;
+                ctx.beginPath();
+                ctx.arc(point.x, point.y, 10, 0, 2 * Math.PI); // Cercle de surlignage
+                ctx.strokeStyle = 'rgba(255, 0, 255, 0.7)';
+                ctx.lineWidth = 3;
+                ctx.stroke();
+            }
+            ctx.restore();
+        }
+
         shapes.forEach(shape => {
             if (shape.type === 'point') {
                 drawPoint(shape);
@@ -140,9 +179,19 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Dessine la ligne temporaire en cours de création
         if (isDrawingLine && lineStartPoint && currentMousePos) {
+            let endPos = currentMousePos;
+            // Si on dessine le long d'un outil, on contraint le point final
+            if (isDrawingOnTool) {
+                if (toolDrawingInfo.tool === 'ruler') {
+                    endPos = ruler.projectOnEdge(currentMousePos, rulerState, false); // false pour prolonger
+                } else if (toolDrawingInfo.tool === 'setsquare') {
+                    endPos = setsquare.projectOnEdge(currentMousePos, setSquareState, toolDrawingInfo.edge, false); // false pour prolonger
+                }
+            }
+
             ctx.beginPath();
             ctx.moveTo(lineStartPoint.x, lineStartPoint.y);
-            ctx.lineTo(currentMousePos.x, currentMousePos.y);
+            ctx.lineTo(endPos.x, endPos.y); // Utilise le point final (contraint ou non)
             // Utilise la couleur actuelle avec de la transparence
             ctx.strokeStyle = currentColor + '80'; // Ajoute 50% d'opacité (hex 80)
             ctx.lineWidth = 2;
@@ -170,6 +219,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Dessine le rapporteur s'il est visible
         protractor.drawProtractor(ctx, protractorState);
+
+        // Dessine l'équerre si elle est visible
+        setsquare.drawSetSquare(ctx, setSquareState);
     }
 
     /**
@@ -218,7 +270,7 @@ document.addEventListener('DOMContentLoaded', () => {
         ctx.beginPath();
         ctx.moveTo(line.x1, line.y1);
         ctx.lineTo(line.x2, line.y2);
-        ctx.strokeStyle = line.color || '#0000FF';
+    ctx.strokeStyle = line.color || '#000000';
         ctx.lineWidth = 2;
         ctx.stroke();
     }
@@ -243,7 +295,8 @@ document.addEventListener('DOMContentLoaded', () => {
             pointNameCounter: pointNameCounter,
             compassState: JSON.parse(JSON.stringify(compassState)),
             rulerState: JSON.parse(JSON.stringify(rulerState)),
-            protractorState: JSON.parse(JSON.stringify(protractorState))
+            protractorState: JSON.parse(JSON.stringify(protractorState)),
+            setSquareState: JSON.parse(JSON.stringify(setSquareState))
         };
         undoStack.push(state);
         // Dès qu'une nouvelle action est faite, l'historique "redo" n'est plus valide
@@ -258,7 +311,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 pointNameCounter: pointNameCounter,
                 compassState: JSON.parse(JSON.stringify(compassState)),
                 rulerState: JSON.parse(JSON.stringify(rulerState)),
-                protractorState: JSON.parse(JSON.stringify(protractorState))
+                protractorState: JSON.parse(JSON.stringify(protractorState)),
+                setSquareState: JSON.parse(JSON.stringify(setSquareState))
             };
             redoStack.push(currentState);
 
@@ -267,6 +321,7 @@ document.addEventListener('DOMContentLoaded', () => {
             pointNameCounter = previousState.pointNameCounter;
             compassState = previousState.compassState;
             rulerState = previousState.rulerState;
+            setSquareState = previousState.setSquareState;
             protractorState = previousState.protractorState;
 
             redrawCanvas();
@@ -281,7 +336,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 pointNameCounter: pointNameCounter,
                 compassState: JSON.parse(JSON.stringify(compassState)),
                 rulerState: JSON.parse(JSON.stringify(rulerState)),
-                protractorState: JSON.parse(JSON.stringify(protractorState))
+                protractorState: JSON.parse(JSON.stringify(protractorState)),
+                setSquareState: JSON.parse(JSON.stringify(setSquareState))
             };
             undoStack.push(currentState);
 
@@ -290,6 +346,7 @@ document.addEventListener('DOMContentLoaded', () => {
             pointNameCounter = nextState.pointNameCounter;
             compassState = nextState.compassState;
             rulerState = nextState.rulerState;
+            setSquareState = nextState.setSquareState;
             protractorState = nextState.protractorState;
 
             redrawCanvas();
@@ -308,6 +365,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 isActive = !!compassState.center || currentTool === 'compass';
             } else if (btnToolName === 'protractor') {
                 isActive = protractorState.visible;
+            } else if (btnToolName === 'setsquare') {
+                isActive = setSquareState.visible;
             } else {
                 // Active if it's the current tool.
                 isActive = currentTool === btnToolName;
@@ -334,6 +393,8 @@ document.addEventListener('DOMContentLoaded', () => {
             rulerOptions.style.display = rulerState.visible ? 'flex' : 'none';
         } else if (toolName === 'protractor') {
             protractorState.visible = !protractorState.visible;
+        } else if (toolName === 'setsquare') {
+            setSquareState.visible = !setSquareState.visible;
         } else if (toolName === 'compass') {
             // If compass is on screen, remove it.
             if (compassState.center) {
@@ -359,6 +420,8 @@ document.addEventListener('DOMContentLoaded', () => {
         rulerDragMode = null;
         isDraggingProtractor = false;
         protractorDragMode = null;
+        isDraggingSetSquare = false;
+        setSquareDragMode = null;
 
         // --- Update UI ---
         updateToolButtons();
@@ -403,14 +466,19 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function executeMouseMove(mousePos) {
         currentMousePos = mousePos; // Mettre à jour l'état global pour le dessin des lignes temporaires
+        snapInfo = null; // Réinitialise à chaque mouvement
+
         if (isDraggingCompass) {
             compass.handleMouseMove(mousePos, compassState, compassDragMode, compassDragStart, arcState);
             redrawCanvas();
         } else if (isDraggingRuler) {
-            ruler.handleMouseMove(mousePos, rulerState, rulerDragMode, rulerDragStart);
+            snapInfo = ruler.handleMouseMove(mousePos, rulerState, rulerDragMode, rulerDragStart, shapes, snap);
             redrawCanvas();
         } else if (isDraggingProtractor) {
             protractor.handleMouseMove(mousePos, protractorState, protractorDragMode, protractorDragStart);
+            redrawCanvas();
+        } else if (isDraggingSetSquare) {
+            snapInfo = setsquare.handleMouseMove(mousePos, setSquareState, setSquareDragMode, setSquareDragStart, shapes, snap);
             redrawCanvas();
         } else if (isDrawingLine) {
             redrawCanvas();
@@ -433,9 +501,19 @@ document.addEventListener('DOMContentLoaded', () => {
         // Check for ruler interaction
         const rulerHit = ruler.getRulerHit(mousePos, rulerState);
         if (rulerHit) {
-            const result = ruler.handleMouseDown(mousePos, rulerState, rulerDragStart);
-            isDraggingRuler = result.isDragging;
-            rulerDragMode = result.dragMode;
+            if (rulerHit === 'drawing-edge') {
+                saveState();
+                isDrawingOnTool = true;
+                const startPos = ruler.projectOnEdge(mousePos, rulerState);
+                toolDrawingInfo = { tool: 'ruler', startPos };
+                // On utilise les variables existantes pour le tracé temporaire
+                isDrawingLine = true;
+                lineStartPoint = startPos;
+            } else {
+                const result = ruler.handleMouseDown(mousePos, rulerState, rulerDragStart);
+                isDraggingRuler = result.isDragging;
+                rulerDragMode = result.dragMode;
+            }
             return; // Interaction handled.
         }
 
@@ -454,6 +532,28 @@ document.addEventListener('DOMContentLoaded', () => {
             const result = protractor.handleMouseDown(mousePos, protractorState, protractorDragStart);
             isDraggingProtractor = result.isDragging;
             protractorDragMode = result.dragMode;
+            return; // Interaction handled.
+        }
+
+        // Check for set square interaction
+        const setSquareHit = setsquare.getSetSquareHit(mousePos, setSquareState);
+        if (setSquareHit) {
+            if (setSquareHit.startsWith('drawing-edge')) {
+                saveState();
+                isDrawingOnTool = true;
+                const edgeType = setSquareHit.split('-')[2];
+                const startPos = setsquare.projectOnEdge(mousePos, setSquareState, edgeType);
+                toolDrawingInfo = { tool: 'setsquare', startPos, edge: edgeType };
+                // On utilise les variables existantes pour le tracé temporaire
+                isDrawingLine = true;
+                lineStartPoint = startPos;
+            } else {
+                // If we are about to interact with the set square, check its current snap status
+                const currentSnapInfo = snap.getSnap({ x: setSquareState.cornerX, y: setSquareState.cornerY }, shapes);
+                const result = setsquare.handleMouseDown(mousePos, setSquareState, setSquareDragStart, currentSnapInfo);
+                isDraggingSetSquare = result.isDragging;
+                setSquareDragMode = result.dragMode;
+            }
             return; // Interaction handled.
         }
 
@@ -499,20 +599,56 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     function executeMouseUp(mousePos) {
+        let needsRedraw = false;
+
+        if (isDrawingOnTool) {
+            let endPos = mousePos;
+            if (toolDrawingInfo.tool === 'ruler') {
+                endPos = ruler.projectOnEdge(mousePos, rulerState, false); // false pour prolonger
+            } else if (toolDrawingInfo.tool === 'setsquare') {
+                endPos = setsquare.projectOnEdge(mousePos, setSquareState, toolDrawingInfo.edge, false); // false pour prolonger
+            }
+
+            // Ne dessine pas une ligne de longueur nulle
+            if (Math.hypot(endPos.x - toolDrawingInfo.startPos.x, endPos.y - toolDrawingInfo.startPos.y) > 2) {
+                shapes.push({ type: 'line', x1: toolDrawingInfo.startPos.x, y1: toolDrawingInfo.startPos.y, x2: endPos.x, y2: endPos.y, color: currentColor });
+            }
+
+            isDrawingOnTool = false;
+            toolDrawingInfo = null;
+            isDrawingLine = false;
+            lineStartPoint = null;
+            needsRedraw = true;
+        }
+
         if (isDraggingCompass) {
             compass.handleMouseUp(compassDragMode, arcState, compassState, shapes, saveState);
             isDraggingCompass = false;
             compassDragMode = null;
-            redrawCanvas();
+            needsRedraw = true;
         }
         if (isDraggingRuler) {
             isDraggingRuler = false;
             rulerDragMode = null;
+            needsRedraw = true;
         }
         if (isDraggingProtractor) {
             isDraggingProtractor = false;
             protractorDragMode = null;
+            needsRedraw = true;
         }
+        if (isDraggingSetSquare) {
+            isDraggingSetSquare = false;
+            setSquareDragMode = null;
+            needsRedraw = true;
+        }
+
+        if (snapInfo) {
+            snapInfo = null;
+            needsRedraw = true;
+        }
+
+        if (needsRedraw) redrawCanvas();
     }
 
     // --- Logique de Sauvegarde / Chargement / Effacement ---
@@ -529,6 +665,7 @@ document.addEventListener('DOMContentLoaded', () => {
             compassState = { center: null, radius: 0, pencil: null }; // Efface aussi le compas
             rulerState.visible = false; // Cache la règle
             protractorState.visible = false; // Cache le rapporteur
+            setSquareState.visible = false; // Cache l'équerre
             redrawCanvas(); // redrawCanvas est appelé dans saveState via undo/redo
         }
     });
@@ -548,7 +685,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 pointNameCounter: pointNameCounter,
                 compassState: compassState,
                 rulerState: rulerState,
-                protractorState: protractorState
+                protractorState: protractorState,
+                setSquareState: setSquareState
             },
             history: undoStack
         };
@@ -591,6 +729,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     compassState = sessionData.currentState.compassState || { center: null, pencil: null, radius: 0 };
                     rulerState = sessionData.currentState.rulerState || { visible: false, zeroX: 150, zeroY: 200, maxLengthCm: 10, height: 50, angle: 0 };
                     protractorState = sessionData.currentState.protractorState || { visible: false, centerX: 400, centerY: 300, radius: 150, angle: 0 };
+                    setSquareState = sessionData.currentState.setSquareState || { visible: false, cornerX: 200, cornerY: 200, size: 300, angle: 0 };
                     undoStack = sessionData.history;
                     redoStack = []; // On vide la pile "redo" lors d'un chargement
 
@@ -615,6 +754,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         compassState = { center: null, pencil: null, radius: 0 };
                         rulerState = { visible: false, zeroX: 150, zeroY: 200, maxLengthCm: 10, height: 50, angle: 0 };
                         protractorState = { visible: false, centerX: 400, centerY: 300, radius: 150, angle: 0 };
+                        setSquareState = { visible: false, cornerX: 200, cornerY: 200, size: 300, angle: 0 };
                         updateHistoryButtons();
                         redrawCanvas();
                         alert("Fichier d'un ancien format chargé. L'historique de construction n'est pas disponible.");
@@ -743,10 +883,28 @@ document.addEventListener('DOMContentLoaded', () => {
             radius: 150,
             angle: 0,
         };
+        setSquareState = {
+            visible: false,
+            cornerX: 200,
+            cornerY: 200,
+            size: 300,
+            angle: 0,
+        };
         rulerLengthInput.value = 10; // Reset ruler length input
 
         currentTool = null;
         isDrawingLine = false;
+
+        // Reset all dragging states to ensure a clean start
+        isDraggingCompass = false;
+        compassDragMode = null;
+        isDraggingRuler = false;
+        rulerDragMode = null;
+        isDraggingProtractor = false;
+        protractorDragMode = null;
+        isDraggingSetSquare = false;
+        setSquareDragMode = null;
+
         updateToolButtons();
         redrawCanvas();
 

@@ -24,14 +24,19 @@ export function getRulerHit(pos, rulerState) {
 
     // Define handle zones
     const handleZoneWidth = 40;
+    const drawingEdgeThickness = 20; // Zone cliquable pour dessiner
 
     // Check if the click is within the ruler's body, which extends from -MARGIN to contentWidth, and from 0 to height
     if (localX >= -RULER_MARGIN && localX <= contentWidth && localY >= 0 && localY <= height) {
-        // The far end is for rotating
+        // Priorité 1: Poignée de rotation
         if (localX > contentWidth - handleZoneWidth) {
             return 'rotating';
         }
-        // The rest of the body is for moving
+        // Priorité 2: Bord pour dessiner
+        if (localX >= 0 && localX <= contentWidth && localY >= 0 && localY <= drawingEdgeThickness) {
+            return 'drawing-edge';
+        }
+        // Priorité 3: Déplacement
         return 'moving';
     }
     return null;
@@ -55,6 +60,18 @@ export function drawRuler(ctx, rulerState) {
     ctx.lineWidth = 1;
     ctx.fillRect(-RULER_MARGIN, 0, width, height);
     ctx.strokeRect(-RULER_MARGIN, 0, width, height);
+
+    // --- Draw visual cues for interactive zones ---
+    const drawingEdgeThickness = 20;
+    const handleZoneWidth = 40;
+    const hintFillStyle = 'rgba(0, 0, 0, 0.07)';
+    ctx.fillStyle = hintFillStyle;
+
+    // Drawing edge (excluding the rotation handle area)
+    ctx.fillRect(0, 0, contentWidth - handleZoneWidth, drawingEdgeThickness);
+
+    // Rotation handle
+    ctx.fillRect(contentWidth - handleZoneWidth, 0, handleZoneWidth, height);
 
     // Dessine les graduations
     ctx.strokeStyle = '#000000';
@@ -106,11 +123,36 @@ export function handleMouseDown(mousePos, rulerState, rulerDragStart) {
     return { isDragging, dragMode };
 }
 
-export function handleMouseMove(currentMousePos, rulerState, rulerDragMode, rulerDragStart) {
+export function handleMouseMove(currentMousePos, rulerState, rulerDragMode, rulerDragStart, shapes, snap) {
+    let snapResult = { snapped: false };
     switch (rulerDragMode) {
         case 'moving':
-            rulerState.zeroX = currentMousePos.x - rulerDragStart.dx;
-            rulerState.zeroY = currentMousePos.y - rulerDragStart.dy;
+            const potentialZeroX = currentMousePos.x - rulerDragStart.dx;
+            const potentialZeroY = currentMousePos.y - rulerDragStart.dy;
+
+            // Essaye de magnétiser
+            if (snap && shapes) {
+                snapResult = snap.getSnap({ x: potentialZeroX, y: potentialZeroY }, shapes);
+            }
+
+            if (snapResult.snapped) {
+                if (snapResult.type === 'line') {
+                    const finalAngle = snapResult.angle;
+                    rulerState.angle = finalAngle;
+                    let finalX = snapResult.position.x;
+                    let finalY = snapResult.position.y;
+
+                    rulerState.zeroX = finalX;
+                    rulerState.zeroY = finalY;
+                } else if (snapResult.type === 'point') {
+                    // Magnétise sur le point : met à jour la position, garde l'angle
+                    rulerState.zeroX = snapResult.position.x;
+                    rulerState.zeroY = snapResult.position.y;
+                }
+            } else {
+                rulerState.zeroX = potentialZeroX;
+                rulerState.zeroY = potentialZeroY;
+            }
             break;
         case 'rotating':
             const currentMouseAngle = Math.atan2(currentMousePos.y - rulerState.zeroY, currentMousePos.x - rulerState.zeroX);
@@ -118,4 +160,40 @@ export function handleMouseMove(currentMousePos, rulerState, rulerDragMode, rule
             rulerState.angle = rulerDragStart.angle + angleDelta;
             break;
     }
+    return snapResult;
+}
+
+/**
+ * Projette un point sur le bord de dessin de la règle.
+ * @param {{x: number, y: number}} pos - La position de la souris.
+ * @param {object} rulerState - L'état de la règle.
+ * @returns {{x: number, y: number}} Le point projeté.
+ */
+export function projectOnEdge(pos, rulerState, clamp = true) {
+    const { zeroX, zeroY, angle, maxLengthCm } = rulerState;
+    const contentWidth = maxLengthCm * PIXELS_PER_CM;
+
+    // Les points de début et de fin du segment de dessin
+    const p1 = { x: zeroX, y: zeroY };
+    const p2 = {
+        x: zeroX + contentWidth * Math.cos(angle),
+        y: zeroY + contentWidth * Math.sin(angle)
+    };
+
+    // Logique de projection de point sur un segment de ligne
+    const dx = p2.x - p1.x;
+    const dy = p2.y - p1.y;
+    const lineLengthSq = dx * dx + dy * dy;
+
+    if (lineLengthSq === 0) return p1;
+
+    let t = ((pos.x - p1.x) * dx + (pos.y - p1.y) * dy) / lineLengthSq;
+    if (clamp) {
+        t = Math.max(0, Math.min(1, t)); // Clamp to the segment
+    }
+
+    return {
+        x: p1.x + t * dx,
+        y: p1.y + t * dy
+    };
 }
