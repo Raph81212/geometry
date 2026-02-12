@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Atelier de Géométrie</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+    <h1>Atelier de Géométrie</h1>
+
+    <div id="toolbar">
+        <button id="tool-point" class="tool-btn">Point</button>
+        <button id="tool-line" class="tool-btn">Ligne</button>
+        <button id="tool-compass" class="tool-btn">Compas</button>
+        <div class="separator"></div>
+        <input type="color" id="color-picker" title="Choisir la couleur">
+        <!-- Les futurs outils viendront ici -->
+        <div class="separator"></div>
+        <button id="btn-undo" title="Retour arrière (Ctrl+Z)">↶</button>
+        <button id="btn-redo" title="Retour avant (Ctrl+Y)">↷</button>
+        <div class="separator"></div>
+        <button id="btn-clear">Effacer</button>
+        <button id="btn-save">Sauvegarder</button>
+        <button id="btn-load">Charger</button>
+        <!-- Input caché pour le chargement de fichier -->
+        <input type="file" id="file-loader" accept=".json" style="display: none;">
+    </div>
+
+    <canvas id="drawing-canvas"></canvas>
+
+    <script src="script.js"></script>
+
+</body>
+</html>
