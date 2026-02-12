@@ -34,14 +34,14 @@ document.addEventListener('DOMContentLoaded', () => {
      * @returns {string} Le nom du point.
      */
     function getPointName(n) {
-        let name = '';
-        let num = n;
-        while (num > 0) {
-            const remainder = (num - 1) % 26;
-            name = String.fromCharCode(65 + remainder) + name; // 65 est le code ASCII pour 'A'
-            num = Math.floor((num - 1) / 26);
-        }
-        return name;
+        if (n <= 0) return '';
+        // Le nombre de primes (A', A'', etc.)
+        const primeCount = Math.floor((n - 1) / 26);
+        // L'index de la lettre (0 pour A, 25 pour Z)
+        const letterIndex = (n - 1) % 26;
+        const letter = String.fromCharCode(65 + letterIndex);
+        const primes = "'".repeat(primeCount);
+        return letter + primes;
     }
 
     /**
@@ -50,11 +50,11 @@ document.addEventListener('DOMContentLoaded', () => {
      * @returns {number} Le numéro du point.
      */
     function getPointNumber(name) {
-        let num = 0;
-        for (let i = 0; i < name.length; i++) {
-            num = num * 26 + (name.charCodeAt(i) - 65 + 1);
-        }
-        return num;
+        if (!name || name.length === 0) return 0;
+        const letter = name.charAt(0);
+        const primeCount = name.length - 1;
+        const letterValue = letter.charCodeAt(0) - 65; // A=0, B=1...
+        return primeCount * 26 + letterValue + 1;
     }
 
     /**
