@@ -14,6 +14,11 @@
         <button id="tool-point" class="tool-btn">Point</button>
         <button id="tool-line" class="tool-btn">Ligne</button>
         <button id="tool-compass" class="tool-btn">Compas</button>
+        <button id="tool-ruler" class="tool-btn">Règle</button>
+        <div id="ruler-options" class="tool-options">
+            <label for="ruler-length">Longueur (cm):</label>
+            <input type="number" id="ruler-length" min="1" max="50" value="10" style="width: 50px;">
+        </div>
         <div class="separator"></div>
         <input type="color" id="color-picker" title="Choisir la couleur">
         <!-- Les futurs outils viendront ici -->
@@ -30,7 +35,7 @@
 
     <canvas id="drawing-canvas"></canvas>
 
-    <script src="script.js"></script>
+    <script type="module" src="script.js"></script>
 
 </body>
 </html>
