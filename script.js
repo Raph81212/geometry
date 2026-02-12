@@ -17,6 +17,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const redoButton = document.getElementById('btn-redo');
     const recordButton = document.getElementById('btn-record');
     const playButton = document.getElementById('btn-play');
+    const replayLoopCheckbox = document.getElementById('replay-loop');
+    const saveRecordingButton = document.getElementById('btn-save-recording');
+    const loadRecordingButton = document.getElementById('btn-load-recording');
+    const recordingLoader = document.getElementById('recording-loader');
     const colorPicker = document.getElementById('color-picker');
     const rulerOptions = document.getElementById('ruler-options');
     const rulerLengthInput = document.getElementById('ruler-length');
@@ -629,6 +633,55 @@ document.addEventListener('DOMContentLoaded', () => {
         event.target.value = '';
     });
 
+    saveRecordingButton.addEventListener('click', () => {
+        if (recording.length === 0) return;
+
+        let filename = prompt("Nommez votre film :", "film_construction");
+        if (!filename) return;
+        if (!filename.toLowerCase().endsWith('.json')) {
+            filename += '.json';
+        }
+
+        const data = JSON.stringify(recording, null, 2);
+        const blob = new Blob([data], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        a.click();
+        URL.revokeObjectURL(url);
+    });
+
+    loadRecordingButton.addEventListener('click', () => {
+        recordingLoader.click();
+    });
+
+    recordingLoader.addEventListener('change', (event) => {
+        const file = event.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            try {
+                const loadedRecording = JSON.parse(e.target.result);
+                if (Array.isArray(loadedRecording)) { // Basic validation
+                    recording = loadedRecording;
+                    playButton.disabled = false;
+                    saveRecordingButton.disabled = false;
+                    alert(`Film "${file.name}" chargé. Prêt à être relu.`);
+                } else {
+                    alert("Le fichier de film n'est pas valide.");
+                }
+            } catch (error) {
+                alert("Erreur lors de la lecture du fichier de film.");
+                console.error(error);
+            }
+        };
+        reader.readAsText(file);
+        event.target.value = ''; // Reset to allow reloading same file
+    });
+
     // --- Logique d'enregistrement et de relecture ---
 
     recordButton.addEventListener('click', () => {
@@ -640,12 +693,14 @@ document.addEventListener('DOMContentLoaded', () => {
             recordButton.textContent = '⏹️ Arrêter';
             recordButton.classList.add('recording');
             playButton.disabled = true; // Disable play while recording
+            saveRecordingButton.disabled = true;
         } else {
             // Stop recording
             recordButton.textContent = '⏺️ Enregistrer';
             recordButton.classList.remove('recording');
             if (recording.length > 0) {
                 playButton.disabled = false;
+                saveRecordingButton.disabled = false;
             }
         }
     });
@@ -662,7 +717,7 @@ document.addEventListener('DOMContentLoaded', () => {
         isReplaying = true;
         // Disable UI, but keep play/stop button active
         document.querySelectorAll('#toolbar button, #toolbar input').forEach(el => {
-            if (el.id !== 'btn-play') {
+            if (el.id !== 'btn-play' && el.id !== 'replay-loop') {
                 el.disabled = true;
             }
         });
@@ -703,25 +758,29 @@ document.addEventListener('DOMContentLoaded', () => {
             clearTimeout(replayTimeoutId);
             replayTimeoutId = null;
         }
+        if (!isReplaying) return;
         isReplaying = false;
         // Re-enable UI
         document.querySelectorAll('#toolbar button, #toolbar input').forEach(el => el.disabled = false);
         playButton.textContent = '▶️ Relire';
         playButton.disabled = (recording.length === 0);
+        saveRecordingButton.disabled = (recording.length === 0);
         // Also re-check record button state
         recordButton.disabled = false;
-        console.log("Replay stopped by user.");
+        console.log("Replay stopped.");
     }
 
     function replayNextEvent(index) {
         if (index >= recording.length) {
-            // Replay finished
-            isReplaying = false;
-            // Re-enable UI
-            document.querySelectorAll('#toolbar button, #toolbar input').forEach(el => el.disabled = false);
-            playButton.textContent = '▶️ Relire';
-            playButton.disabled = (recording.length === 0);
-            console.log("Replay finished.");
+            if (isReplaying && replayLoopCheckbox.checked) {
+                // Loop by starting over
+                console.log("Replay loop.");
+                startReplay();
+            } else {
+                // Replay finished
+                console.log("Replay finished.");
+                stopReplay();
+            }
             return;
         }
 
