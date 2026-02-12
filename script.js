@@ -98,7 +98,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function drawPoint(point) {
-        const crossSize = 4; // Taille des branches de la croix
+        const crossSize = 6; // Taille des branches de la croix
 
         // Dessine la croix (diagonale)
         ctx.beginPath();
@@ -107,7 +107,7 @@ document.addEventListener('DOMContentLoaded', () => {
         ctx.moveTo(point.x + crossSize, point.y - crossSize);
         ctx.lineTo(point.x - crossSize, point.y + crossSize);
         ctx.strokeStyle = point.color || '#000000';
-        ctx.lineWidth = 1.5;
+        ctx.lineWidth = 2;
         ctx.stroke();
 
         // Dessine le nom du point
