@@ -214,7 +214,6 @@ document.addEventListener('DOMContentLoaded', () => {
         // Dessine le compas s'il existe, et l'arc temporaire en cours de tracé
         if (compassState.center) {
             compass.drawCompass(ctx, compassState, isDraggingCompass, compassDragMode);
-
             if (isDraggingCompass && compassDragMode === 'rotating') {
                 ctx.beginPath();
                 ctx.arc(compassState.center.x, compassState.center.y, compassState.radius, arcState.startAngle, arcState.endAngle);
@@ -575,7 +574,7 @@ document.addEventListener('DOMContentLoaded', () => {
             draggedShape.y = newY;
             redrawCanvas();
         } else if (isDraggingCompass) {
-            compass.handleMouseMove(mousePos, compassState, compassDragMode, compassDragStart, arcState);
+            snapInfo = compass.handleMouseMove(mousePos, compassState, compassDragMode, compassDragStart, arcState, shapes, snap);
             redrawCanvas();
         } else if (isDraggingRuler) {
             snapInfo = ruler.handleMouseMove(mousePos, rulerState, rulerDragMode, rulerDragStart, shapes, snap);
