@@ -3,6 +3,12 @@ import * as ruler from './tool-ruler.js';
 import * as protractor from './tool-protractor.js';
 import * as setsquare from './tool-setsquare.js';
 import * as snap from './snap.js';
+import * as utils from './utils.js';
+import * as grid from './grid.js';
+import * as drawing from './drawing.js';
+import { calculateLineCanvasIntersections } from './line-utils.js'; // Keep this for temporary drawing in script.js
+import * as lineTool from './tool-line-and-segment.js'; // Re-import the line tool module
+import * as shapeInteraction from './shape-interaction.js';
 
 document.addEventListener('DOMContentLoaded', () => {
     // --- Initialisation ---
@@ -23,21 +29,46 @@ document.addEventListener('DOMContentLoaded', () => {
     const saveRecordingButton = document.getElementById('btn-save-recording');
     const loadRecordingButton = document.getElementById('btn-load-recording');
     const recordingLoader = document.getElementById('recording-loader');
-    const colorPicker = document.getElementById('color-picker');
+    const colorPickerWrapper = document.getElementById('color-picker-wrapper');
+    const currentColorDisplay = document.getElementById('current-color-display');
+    const colorSwatches = document.querySelectorAll('#color-palette-popup .color-swatch');
     const rulerOptions = document.getElementById('ruler-options');
     const rulerLengthInput = document.getElementById('ruler-length');
+    const gridButton = document.getElementById('btn-grid');
 
     // --- État de l'application ---
+    const PIXELS_PER_CM = 37.8; // Constante pour un écran à 96 DPI
     let shapes = []; // Notre "modèle", la liste de toutes les formes dessinées
+    let gridType = 'none'; // 'none', 'cm', 'orthonormal'
+    let currentGridIndex = 0;
+
+    const gridStates = [
+        {
+            type: 'none',
+            title: 'Grille : Aucune'
+        },
+        {
+            type: 'cm',
+            title: 'Grille : Carreaux'
+        },
+        {
+            type: 'orthonormal',
+            title: 'Grille : Repère'
+        }
+    ];
+
     // Piles pour l'historique des actions
     let undoStack = [];
     let redoStack = [];
     let pointNameCounter = 0; // Pour nommer les points A, B, C...
-    let currentColor = '#000000'; // Couleur de dessin actuelle
+    let currentColor = '#000000'; // Couleur de dessin actuelle (noir par défaut)
 
     let currentTool = null;
-    let isDrawingLine = false; // Pour gérer le dessin de ligne en 2 clics
-    let lineStartPoint = null;
+    let lineToolState = { // Renamed from lineState to lineToolState to avoid conflict with local lineStartPoint
+        mode: 'segment', // 'segment' or 'line'
+        isDrawing: false,
+        startPoint: null,
+    };
     let isDrawingOnTool = false; // Pour tracer une ligne le long d'un outil
     let toolDrawingInfo = null; // { tool: 'ruler'|'setsquare', startPos: {x,y}, edge?: 'h'|'v' }
     // --- État du compas persistant ---
@@ -98,6 +129,11 @@ document.addEventListener('DOMContentLoaded', () => {
     let currentMousePos = null; // Pour le dessin en temps réel
     let snapInfo = null; // Pour magnétiser les outils
 
+    // --- État du déplacement de formes ---
+    let isDraggingShape = false;
+    let draggedShape = null;
+    let dragOffset = { x: 0, y: 0 };
+
     // --- Helper for recording ---
     function recordEvent(type, data) {
         if (!isRecording) return;
@@ -111,39 +147,17 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- Fonctions de dessin ---
 
     /**
-     * Convertit un nombre en une séquence de lettres majuscules (1->A, 2->B, 27->AA).
-     * @param {number} n - Le numéro du point.
-     * @returns {string} Le nom du point.
-     */
-    function getPointName(n) {
-        if (n <= 0) return '';
-        // Le nombre de primes (A', A'', etc.)
-        const primeCount = Math.floor((n - 1) / 26);
-        // L'index de la lettre (0 pour A, 25 pour Z)
-        const letterIndex = (n - 1) % 26;
-        const letter = String.fromCharCode(65 + letterIndex);
-        const primes = "'".repeat(primeCount);
-        return letter + primes;
-    }
-
-    /**
-     * Convertit un nom de point (ex: 'A', 'B', 'AA') en son numéro séquentiel.
-     * @param {string} name - Le nom du point.
-     * @returns {number} Le numéro du point.
-     */
-    function getPointNumber(name) {
-        if (!name || name.length === 0) return 0;
-        const letter = name.charAt(0);
-        const primeCount = name.length - 1;
-        const letterValue = letter.charCodeAt(0) - 65; // A=0, B=1...
-        return primeCount * 26 + letterValue + 1;
-    }
-
-    /**
      * Efface et redessine tout le canvas à partir de la liste `shapes`.
      */
     function redrawCanvas() {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        // Draw grid based on gridType
+        if (gridType === 'cm') {
+            grid.drawCmGrid(ctx, canvas.width, canvas.height, PIXELS_PER_CM);
+        } else if (gridType === 'orthonormal') {
+            grid.drawOrthonormalGrid(ctx, canvas.width, canvas.height, PIXELS_PER_CM);
+        }
 
         // Dessine un surlignage pour la ligne/point magnétisé(e)
         if (snapInfo && snapInfo.snapped) {
@@ -169,41 +183,42 @@ document.addEventListener('DOMContentLoaded', () => {
 
         shapes.forEach(shape => {
             if (shape.type === 'point') {
-                drawPoint(shape);
+                drawing.drawPoint(ctx, shape, shapes);
             } else if (shape.type === 'line') {
-                drawLine(shape);
+                drawing.drawLine(ctx, shape);
             } else if (shape.type === 'arc') {
-                drawArc(shape);
+                drawing.drawArc(ctx, shape);
+            } else if (shape.type === 'text') {
+                drawing.drawText(ctx, shape);
             }
         });
 
         // Dessine la ligne temporaire en cours de création
-        if (isDrawingLine && lineStartPoint && currentMousePos) {
+        if (currentTool === 'line' || currentTool === 'segment') { // Use the lineTool module for temporary drawing
+            lineTool.drawTemporaryShapes({ ctx, lineState: lineToolState, currentMousePos, canvas, currentColor });
+        } else if (isDrawingOnTool && lineToolState.startPoint && currentMousePos) {
+            // This block handles drawing along a tool (ruler/setsquare)
             let endPos = currentMousePos;
-            // Si on dessine le long d'un outil, on contraint le point final
-            if (isDrawingOnTool) {
-                if (toolDrawingInfo.tool === 'ruler') {
-                    endPos = ruler.projectOnEdge(currentMousePos, rulerState, false); // false pour prolonger
-                } else if (toolDrawingInfo.tool === 'setsquare') {
-                    endPos = setsquare.projectOnEdge(currentMousePos, setSquareState, toolDrawingInfo.edge, false); // false pour prolonger
-                }
+            if (toolDrawingInfo.tool === 'ruler') {
+                endPos = ruler.projectOnEdge(currentMousePos, rulerState, false); // false to extend
+            } else if (toolDrawingInfo.tool === 'setsquare') {
+                endPos = setsquare.projectOnEdge(currentMousePos, setSquareState, toolDrawingInfo.edge, false); // false to extend
             }
 
+            ctx.save();
             ctx.beginPath();
-            ctx.moveTo(lineStartPoint.x, lineStartPoint.y);
-            ctx.lineTo(endPos.x, endPos.y); // Utilise le point final (contraint ou non)
-            // Utilise la couleur actuelle avec de la transparence
-            ctx.strokeStyle = currentColor + '80'; // Ajoute 50% d'opacité (hex 80)
+            ctx.moveTo(lineToolState.startPoint.x, lineToolState.startPoint.y);
+            ctx.lineTo(endPos.x, endPos.y);
+            ctx.strokeStyle = currentColor + '80'; // semi-transparent
             ctx.lineWidth = 2;
-            ctx.setLineDash([5, 5]); // Ligne en pointillés
+            ctx.setLineDash([5, 5]);
             ctx.stroke();
-            ctx.setLineDash([]); // Réinitialise pour les prochains traits
+            ctx.restore();
         }
 
         // Dessine le compas s'il existe, et l'arc temporaire en cours de tracé
         if (compassState.center) {
             compass.drawCompass(ctx, compassState, isDraggingCompass, compassDragMode);
-
             if (isDraggingCompass && compassDragMode === 'rotating') {
                 ctx.beginPath();
                 ctx.arc(compassState.center.x, compassState.center.y, compassState.radius, arcState.startAngle, arcState.endAngle);
@@ -234,45 +249,6 @@ document.addEventListener('DOMContentLoaded', () => {
         canvas.height = canvas.offsetHeight;
         shapes = shapesToRedraw;
         redrawCanvas();
-    }
-
-    function drawArc(arc) {
-        ctx.beginPath();
-        ctx.arc(arc.cx, arc.cy, arc.radius, arc.startAngle, arc.endAngle);
-        ctx.strokeStyle = arc.color || '#0000FF';
-        ctx.lineWidth = 2;
-        ctx.stroke();
-    }
-
-    function drawPoint(point) {
-        const crossSize = 6; // Taille des branches de la croix
-
-        // Dessine la croix (diagonale)
-        ctx.beginPath();
-        ctx.moveTo(point.x - crossSize, point.y - crossSize);
-        ctx.lineTo(point.x + crossSize, point.y + crossSize);
-        ctx.moveTo(point.x + crossSize, point.y - crossSize);
-        ctx.lineTo(point.x - crossSize, point.y + crossSize);
-        ctx.strokeStyle = point.color || '#000000';
-        ctx.lineWidth = 2;
-        ctx.stroke();
-
-        // Dessine le nom du point
-        ctx.fillStyle = point.color || '#000000';
-        ctx.font = '14px sans-serif';
-        ctx.textAlign = 'left';
-        ctx.textBaseline = 'bottom';
-        // Affiche le nom à côté de la croix
-        ctx.fillText(point.name, point.x + crossSize + 3, point.y - crossSize);
-    }
-
-    function drawLine(line) {
-        ctx.beginPath();
-        ctx.moveTo(line.x1, line.y1);
-        ctx.lineTo(line.x2, line.y2);
-    ctx.strokeStyle = line.color || '#000000';
-        ctx.lineWidth = 2;
-        ctx.stroke();
     }
 
     // --- Gestion de l'historique (Undo/Redo) ---
@@ -344,7 +320,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const nextState = redoStack.pop();
             shapes = nextState.shapes;
             pointNameCounter = nextState.pointNameCounter;
-            compassState = nextState.compassState;
+            compassState = nextState.compassState; 
             rulerState = nextState.rulerState;
             setSquareState = nextState.setSquareState;
             protractorState = nextState.protractorState;
@@ -355,9 +331,27 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function updateToolButtons() {
+        const segmentIcon = `<svg viewBox="0 0 24 24"><circle cx="4" cy="20" r="2"/><circle cx="20" cy="4" r="2"/><line x1="5.41" y1="18.59" x2="18.59" y2="5.41" stroke="currentColor" stroke-width="2"/></svg>`;
+        const lineIcon = `<svg viewBox="0 0 24 24"><path d="M21.71 3.29a1 1 0 0 0-1.42 0l-18 18a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l18-18a1 1 0 0 0 0-1.42z"/></svg>`;
+
         toolButtons.forEach(button => {
             const btnToolName = button.id.split('-')[1];
             let isActive = false;
+
+            // Special handling for the combined line/segment tool
+            if (button.id === 'tool-line') { // This is now the toggle button
+                if (currentTool === 'line' || currentTool === 'segment') {
+                    button.classList.add('active');
+                    button.innerHTML = (lineToolState.mode === 'segment') ? segmentIcon : lineIcon;
+                    button.title = (lineToolState.mode === 'segment') ? 'Segment (clic pour mode Droite)' : 'Droite (clic pour désactiver)';
+                } else {
+                    button.classList.remove('active');
+                    button.innerHTML = segmentIcon; // Default icon when not active
+                    button.title = 'Segment / Droite';
+                }
+                return; // Skip default active check for this button
+            }
+
             if (btnToolName === 'ruler') {
                 isActive = rulerState.visible;
             } else if (btnToolName === 'compass') {
@@ -371,7 +365,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 // Active if it's the current tool.
                 isActive = currentTool === btnToolName;
             }
-
             if (isActive) {
                 button.classList.add('active');
             } else {
@@ -388,7 +381,19 @@ document.addEventListener('DOMContentLoaded', () => {
      */
     function executeSetActiveTool(toolName) {
         // --- Handle Toggling Persistent Tools ---
-        if (toolName === 'ruler') {
+        if (toolName === 'line') { // This is now the toggle button for segment/line
+            if (currentTool !== 'line' && currentTool !== 'segment') { // If neither is active, activate segment mode
+                currentTool = 'segment';
+                lineToolState.mode = 'segment';
+            } else if (currentTool === 'segment') { // If segment is active, switch to line mode
+                currentTool = 'line';
+                lineToolState.mode = 'line';
+            } else { // If line is active, deactivate both
+                currentTool = null;
+                lineToolState.mode = 'segment'; // Reset to default for next activation
+            }
+            lineTool.resetState(lineToolState); // Reset drawing state for the tool
+        } else if (toolName === 'ruler') {
             rulerState.visible = !rulerState.visible;
             rulerOptions.style.display = rulerState.visible ? 'flex' : 'none';
         } else if (toolName === 'protractor') {
@@ -406,14 +411,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 // If compass is not on screen, set it as the active tool to be placed.
                 currentTool = 'compass';
             }
-        } else { // For 'point', 'line'
+        } else { // For 'point', 'mark', 'text', 'move', 'eraser'
             // If we click the same tool again, deselect it. Otherwise, select it.
             currentTool = (currentTool === toolName) ? null : toolName;
         }
 
         // --- Stop any ongoing drag operations ---
-        isDrawingLine = false;
-        lineStartPoint = null;
+        lineTool.resetState(lineToolState); // Ensure the line tool state is reset
         isDraggingCompass = false;
         compassDragMode = null;
         isDraggingRuler = false;
@@ -422,6 +426,8 @@ document.addEventListener('DOMContentLoaded', () => {
         protractorDragMode = null;
         isDraggingSetSquare = false;
         setSquareDragMode = null;
+        isDraggingShape = false;
+        draggedShape = null;
 
         // --- Update UI ---
         updateToolButtons();
@@ -434,6 +440,30 @@ document.addEventListener('DOMContentLoaded', () => {
             rulerState.maxLengthCm = newLength;
             redrawCanvas(); // Redessine la règle avec la nouvelle longueur
         }
+    }
+
+    function updateGridButton() {
+        const state = gridStates[currentGridIndex];
+        gridButton.title = state.title;
+    }
+
+    function executeGridChange() {
+        currentGridIndex = (currentGridIndex + 1) % gridStates.length;
+        const newGridState = gridStates[currentGridIndex];
+        gridType = newGridState.type;
+        updateGridButton();
+        redrawCanvas();
+    }
+
+    function updateColorDisplay() {
+        currentColorDisplay.style.backgroundColor = currentColor;
+        colorSwatches.forEach(swatch => {
+            if (swatch.dataset.color === currentColor) {
+                swatch.classList.add('active-color');
+            } else {
+                swatch.classList.remove('active-color');
+            }
+        });
     }
 
     // Ajoute les écouteurs d'événements aux boutons d'outils
@@ -454,6 +484,39 @@ document.addEventListener('DOMContentLoaded', () => {
         executeRulerLengthChange(newLength);
     });
 
+    gridButton.addEventListener('click', () => {
+        if (isReplaying) return;
+        recordEvent('grid_change', {});
+        executeGridChange();
+    });
+
+    currentColorDisplay.addEventListener('click', (e) => {
+        e.stopPropagation(); // Empêche le listener de document de se déclencher immédiatement
+        colorPickerWrapper.classList.toggle('open');
+    });
+
+    colorSwatches.forEach(swatch => {
+        swatch.addEventListener('click', (e) => {
+            if (isReplaying) return;
+            const newColor = e.target.dataset.color;
+            recordEvent('color_change', { color: newColor });
+            executeColorChange(newColor);
+            colorPickerWrapper.classList.remove('open'); // Ferme la palette après sélection
+        });
+    });
+
+    function executeColorChange(color) {
+        currentColor = color;
+        updateColorDisplay();
+    }
+
+    // Ferme la palette de couleurs si on clique en dehors
+    document.addEventListener('click', (e) => {
+        if (!colorPickerWrapper.contains(e.target)) {
+            colorPickerWrapper.classList.remove('open');
+        }
+    });
+
     // --- Gestion des événements du Canvas ---
 
     canvas.addEventListener('mousemove', (event) => {
@@ -469,41 +532,86 @@ document.addEventListener('DOMContentLoaded', () => {
         snapInfo = null; // Réinitialise à chaque mouvement
 
         // Si on dessine une ligne (libre ou sur un outil), on cherche à magnétiser le point final
-        if (isDrawingLine) {
+        if (lineToolState.isDrawing && (currentTool === 'segment' || currentTool === 'line')) {
             const snapResult = snap.getSnap(mousePos, shapes);
             if (snapResult.snapped && snapResult.type === 'point') {
                 snapInfo = snapResult; // Mémorise l'info pour le surlignage et le dessin
             }
+        } else if (currentTool === 'line') { // This case should be covered by the above, but for safety
+            // This block is now redundant due to the combined line/segment tool logic
+        } else {
+            snapInfo = null;
         }
 
         // --- Logique de changement de curseur ---
-        let cursorIsPencil = false;
-
-        // On veut le curseur crayon si:
-        // 1. On est en train de tracer une ligne (soit libre, soit sur un outil).
-        if (isDrawingLine) {
-            cursorIsPencil = true;
-        }
-        // 2. Ou si on n'est pas en train de tracer/glisser, mais qu'on survole un bord de dessin.
-        else {
-            const noDragActive = !isDraggingRuler && !isDraggingSetSquare && !isDraggingProtractor && !isDraggingCompass;
-            if (noDragActive) {
-                if (ruler.getRulerHit(mousePos, rulerState) === 'drawing-edge') {
-                    cursorIsPencil = true;
-                } else {
-                    const setSquareHit = setsquare.getSetSquareHit(mousePos, setSquareState);
-                    if (setSquareHit && setSquareHit.startsWith('drawing-edge')) {
+        let newCursor = 'default';
+        if (isDraggingShape) {
+            newCursor = 'move';
+        } else if (currentTool === 'move' && shapeInteraction.findMovableShapeAt(mousePos, shapes, ctx)) {
+            newCursor = 'move';
+        } else if (currentTool === 'eraser' && shapeInteraction.findShapeAt(mousePos, shapes, ctx)) {
+            newCursor = 'crosshair';
+        } else {
+            let cursorIsPencil = false;
+            if (lineToolState.isDrawing && (currentTool === 'segment' || currentTool === 'line')) {
+                cursorIsPencil = true;
+            } else {
+                const noDragActive = !isDraggingRuler && !isDraggingSetSquare && !isDraggingProtractor && !isDraggingCompass && !isDraggingShape;
+                if (noDragActive) {
+                    if (ruler.getRulerHit(mousePos, rulerState) === 'drawing-edge') {
                         cursorIsPencil = true;
+                    } else {
+                        const setSquareHit = setsquare.getSetSquareHit(mousePos, setSquareState);
+                        if (setSquareHit && setSquareHit.startsWith('drawing-edge')) {
+                            cursorIsPencil = true;
+                        }
                     }
                 }
             }
+            if (cursorIsPencil) {
+                newCursor = 'pencil';
+            }
         }
 
-        canvas.classList.toggle('pencil-cursor', cursorIsPencil);
+        if (newCursor === 'pencil') {
+            canvas.classList.add('pencil-cursor');
+            canvas.style.cursor = ''; // Laisse la classe CSS gérer le curseur
+        } else {
+            canvas.classList.remove('pencil-cursor');
+            canvas.style.cursor = newCursor;
+        }
         // --- Fin de la logique de changement de curseur ---
 
-        if (isDraggingCompass) {
-            compass.handleMouseMove(mousePos, compassState, compassDragMode, compassDragStart, arcState);
+        if (isDraggingShape) {
+            const newX = mousePos.x - dragOffset.x;
+            const newY = mousePos.y - dragOffset.y;
+
+            // Si on déplace un point, on met à jour les lignes connectées
+            if (draggedShape.type === 'point') {
+                const oldX = draggedShape.x;
+                const oldY = draggedShape.y;
+
+                shapes.forEach(s => {
+                    if (s.type === 'line') {
+                        // Utilise une petite tolérance pour la comparaison des flottants
+                        if (Math.hypot(s.x1 - oldX, s.y1 - oldY) < 1) {
+                            s.x1 = newX;
+                            s.y1 = newY;
+                        }
+                        if (Math.hypot(s.x2 - oldX, s.y2 - oldY) < 1) {
+                            s.x2 = newX;
+                            s.y2 = newY;
+                        }
+                    }
+                });
+            }
+
+            // Met à jour la position de la forme déplacée
+            draggedShape.x = newX;
+            draggedShape.y = newY;
+            redrawCanvas();
+        } else if (isDraggingCompass) {
+            snapInfo = compass.handleMouseMove(mousePos, compassState, compassDragMode, compassDragStart, arcState, shapes, snap);
             redrawCanvas();
         } else if (isDraggingRuler) {
             snapInfo = ruler.handleMouseMove(mousePos, rulerState, rulerDragMode, rulerDragStart, shapes, snap);
@@ -513,8 +621,8 @@ document.addEventListener('DOMContentLoaded', () => {
             redrawCanvas();
         } else if (isDraggingSetSquare) {
             snapInfo = setsquare.handleMouseMove(mousePos, setSquareState, setSquareDragMode, setSquareDragStart, shapes, snap);
-            redrawCanvas();
-        } else if (isDrawingLine) {
+            redrawCanvas(); // This was the missing redraw for setsquare
+        } else if (lineToolState.isDrawing) {
             redrawCanvas();
         }
     }
@@ -541,8 +649,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 const startPos = ruler.projectOnEdge(mousePos, rulerState);
                 toolDrawingInfo = { tool: 'ruler', startPos };
                 // On utilise les variables existantes pour le tracé temporaire
-                isDrawingLine = true;
-                lineStartPoint = startPos;
+                lineToolState.isDrawing = true;
+                lineToolState.startPoint = startPos;
             } else {
                 const result = ruler.handleMouseDown(mousePos, rulerState, rulerDragStart);
                 isDraggingRuler = result.isDragging;
@@ -579,8 +687,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 const startPos = setsquare.projectOnEdge(mousePos, setSquareState, edgeType);
                 toolDrawingInfo = { tool: 'setsquare', startPos, edge: edgeType };
                 // On utilise les variables existantes pour le tracé temporaire
-                isDrawingLine = true;
-                lineStartPoint = startPos;
+                lineToolState.isDrawing = true;
+                lineToolState.startPoint = startPos;
             } else {
                 // If we are about to interact with the set square, check its current snap status
                 const currentSnapInfo = snap.getSnap({ x: setSquareState.cornerX, y: setSquareState.cornerY }, shapes);
@@ -596,34 +704,109 @@ document.addEventListener('DOMContentLoaded', () => {
             case 'point':
                 saveState();
                 pointNameCounter++;
-                const name = getPointName(pointNameCounter);
+                const name = utils.getPointName(pointNameCounter);
                 shapes.push({ type: 'point', x: mousePos.x, y: mousePos.y, name, color: currentColor });
                 redrawCanvas();
                 break;
-            case 'line':
-                if (!isDrawingLine) {
-                    // Premier clic : début de la ligne
-                    isDrawingLine = true;
-                    // Magnétise le point de départ s'il est proche d'un point existant
-                    const snapResult = snap.getSnap(mousePos, shapes);
-                    if (snapResult.snapped && snapResult.type === 'point') {
-                        lineStartPoint = snapResult.position;
-                    } else {
-                        lineStartPoint = { x: mousePos.x, y: mousePos.y };
-                    }
-                } else {
-                    // Deuxième clic : fin de la ligne
+            case 'text':
+                const textContent = prompt("Entrez votre texte :");
+                if (textContent) { // N'ajoute rien si l'utilisateur annule
                     saveState();
-                    let endPos = { x: mousePos.x, y: mousePos.y };
-                    // Magnétise le point d'arrivée s'il est proche d'un point existant
-                    const snapResult = snap.getSnap(mousePos, shapes);
-                    if (snapResult.snapped && snapResult.type === 'point') {
-                        endPos = snapResult.position;
+                    shapes.push({ type: 'text', x: mousePos.x, y: mousePos.y, content: textContent, color: currentColor });
+                    redrawCanvas();
+                }
+                break;
+            case 'move':
+                const shapeToDrag = shapeInteraction.findMovableShapeAt(mousePos, shapes, ctx);
+                if (shapeToDrag) {
+                    saveState(); // Sauvegarde l'état avant de commencer le déplacement
+                    isDraggingShape = true;
+                    draggedShape = shapeToDrag;
+                    dragOffset.x = mousePos.x - draggedShape.x;
+                    dragOffset.y = mousePos.y - draggedShape.y;
+                }
+                break;
+            case 'eraser':
+                const shapeToDelete = shapeInteraction.findShapeAt(mousePos, shapes, ctx);
+                if (shapeToDelete) {
+                    saveState();
+
+                    if (shapeToDelete.type === 'point') {
+                        const pointX = shapeToDelete.x;
+                        const pointY = shapeToDelete.y;
+                        // Filter out the point and any connected lines
+                        shapes = shapes.filter(s => {
+                            if (s === shapeToDelete) return false; // Remove the point itself
+                            if (s.type === 'line') {
+                                const isConnected = (Math.hypot(s.x1 - pointX, s.y1 - pointY) < 1) ||
+                                    (Math.hypot(s.x2 - pointX, s.y2 - pointY) < 1);
+                                return !isConnected; // Keep the line if it's NOT connected
+                            }
+                            return true; // Keep other shapes
+                        });
+                    } else {
+                        // For lines, text, etc., just remove the single shape
+                        const index = shapes.indexOf(shapeToDelete);
+                        if (index > -1) {
+                            shapes.splice(index, 1);
+                        }
                     }
-                    shapes.push({ type: 'line', x1: lineStartPoint.x, y1: lineStartPoint.y, x2: endPos.x, y2: endPos.y, color: currentColor });
-                    isDrawingLine = false;
-                    lineStartPoint = null;
-                    snapInfo = null; // Nettoie l'info de magnétisme pour enlever le surlignage
+                    redrawCanvas();
+                }
+                break;
+            case 'line':
+            case 'segment': // Both segment and line modes are handled by the lineTool module
+                const newShape = lineTool.handleMouseDown({
+                    mousePos, lineState: lineToolState, shapes, snap, canvas, currentColor,
+                    getPointName: () => utils.getPointName(pointNameCounter + 1), // Pass helper for point naming
+                    incrementPointCounter: () => pointNameCounter++ // Pass helper for counter increment
+                });
+                if (newShape) {
+                    saveState();
+                    shapes.push(newShape);
+                }
+                snapInfo = null; // Clear snap info after action
+                redrawCanvas();
+                break;
+            case 'mark':
+                const snapResult = snap.getSnap(mousePos, shapes);
+
+                if (!snapResult.snapped) return;
+
+                // Priorité au codage d'angle sur un point
+                if (snapResult.type === 'point') {
+                    const point = snapResult.snappedShape;
+                    const connectedLines = shapes.filter(s =>
+                        s.type === 'line' &&
+                        (
+                            (Math.hypot(s.x1 - point.x, s.y1 - point.y) < 1) ||
+                            (Math.hypot(s.x2 - point.x, s.y2 - point.y) < 1)
+                        )
+                    );
+
+                    if (connectedLines.length === 2) {
+                        saveState();
+                        if (!point.angleMark) {
+                            point.angleMark = { type: 'single' };
+                        } else {
+                            switch (point.angleMark.type) {
+                                case 'single': point.angleMark.type = 'double'; break;
+                                case 'double': point.angleMark.type = 'right'; break;
+                                case 'right': point.angleMark = null; break; // cycle
+                            }
+                        }
+                        redrawCanvas();
+                        return; // Action de codage d'angle effectuée
+                    }
+                }
+
+                // Si ce n'est pas un angle, ou si le snap est sur une ligne, on code la ligne
+                const lineSnapResult = snap.getSnap(mousePos, shapes.filter(s => s.type === 'line'));
+                if (lineSnapResult.snapped) {
+                    const lineToMark = lineSnapResult.snappedShape;
+                    saveState();
+                    // Fait cycler le codage de 0 (aucun) à 3 (|||)
+                    lineToMark.marking = ((lineToMark.marking || 0) + 1) % 4;
                     redrawCanvas();
                 }
                 break;
@@ -664,8 +847,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
             isDrawingOnTool = false;
             toolDrawingInfo = null;
-            isDrawingLine = false;
-            lineStartPoint = null;
+            lineTool.resetState(lineToolState); // Reset line tool state
+            // isDrawingSegment and segmentStartPoint are now managed by lineToolState
             needsRedraw = true;
         }
 
@@ -690,6 +873,11 @@ document.addEventListener('DOMContentLoaded', () => {
             setSquareDragMode = null;
             needsRedraw = true;
         }
+        if (isDraggingShape) {
+            isDraggingShape = false;
+            draggedShape = null;
+            needsRedraw = true;
+        }
 
         if (snapInfo) {
             snapInfo = null;
@@ -709,7 +897,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             shapes = [];
             pointNameCounter = 0; // Réinitialise le compteur de noms
-            isDrawingLine = false;
+            lineTool.resetState(lineToolState); // Reset line tool state
             compassState = { center: null, radius: 0, pencil: null }; // Efface aussi le compas
             rulerState.visible = false; // Cache la règle
             protractorState.visible = false; // Cache le rapporteur
@@ -792,7 +980,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         // Recalcule le compteur de points
                         const pointNames = shapes.filter(s => s.type === 'point' && s.name).map(p => p.name);
                         if (pointNames.length > 0) {
-                            pointNameCounter = Math.max(0, ...pointNames.map(getPointNumber));
+                        pointNameCounter = Math.max(0, ...pointNames.map(utils.getPointNumber));
                         } else {
                             pointNameCounter = 0;
                         }
@@ -941,7 +1129,8 @@ document.addEventListener('DOMContentLoaded', () => {
         rulerLengthInput.value = 10; // Reset ruler length input
 
         currentTool = null;
-        isDrawingLine = false;
+        lineTool.resetState(lineToolState); // Reset line tool state
+        // isDrawingSegment, segmentStartPoint, lineStartPoint are now managed by lineToolState
 
         // Reset all dragging states to ensure a clean start
         isDraggingCompass = false;
@@ -1004,6 +1193,8 @@ document.addEventListener('DOMContentLoaded', () => {
             case 'mousedown':           executeMouseDown(event.data.pos); break;
             case 'mousemove':           executeMouseMove(event.data.pos); break;
             case 'mouseup':             executeMouseUp(event.data.pos); break;
+            case 'color_change':        executeColorChange(event.data.color); break;
+            case 'grid_change':         executeGridChange(); break;
             case 'ruler_length_change': executeRulerLengthChange(event.data.length); break;
         }
 
@@ -1011,15 +1202,6 @@ document.addEventListener('DOMContentLoaded', () => {
             replayNextEvent(index + 1);
         }, delay);
     }
-
-    // --- Écouteurs d'événements pour l'historique ---
-
-    undoButton.addEventListener('click', undo);
-    redoButton.addEventListener('click', redo);
-
-    colorPicker.addEventListener('input', (e) => {
-        currentColor = e.target.value;
-    });
 
     // Bonus : Raccourcis clavier
     document.addEventListener('keydown', (e) => {
@@ -1037,10 +1219,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- Initialisation de la page ---
 
+    // --- Écouteurs d'événements pour l'historique ---
+    undoButton.addEventListener('click', undo);
+    redoButton.addEventListener('click', redo);
+
     // État initial des boutons au chargement de la page
     updateHistoryButtons();
     // Redimensionne le canvas une première fois
     resizeCanvas();
+    updateColorDisplay(); // Initialise l'affichage de la couleur active
+    updateGridButton();
     // Ajoute un écouteur pour redimensionner quand la fenêtre change de taille
     window.addEventListener('resize', resizeCanvas);
 });

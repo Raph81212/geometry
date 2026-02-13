@@ -1,4 +1,5 @@
 // tool-compass.js
+import { pointToLineSegmentDistance } from './utils.js';
 
 /**
  * Calcule la position de la charnière du compas pour un rendu réaliste.
@@ -25,20 +26,41 @@ export function calculateHinge(center, pencil) {
  */
 export function getCompassHit(pos, compassState) {
     if (!compassState.center) return null;
-    const hitRadius = 25; // Rayon de détection du clic (agrandi)
+    const hitRadius = 25; // Rayon de détection pour les poignées
+    const legHitThreshold = 15; // Rayon de détection pour les branches
     const hinge = calculateHinge(compassState.center, compassState.pencil);
+
+    // Priorité 1: Poignées (charnière, crayon, pointe)
     if (hinge && Math.hypot(pos.x - hinge.x, pos.y - hinge.y) < hitRadius) return 'rotating';
     if (Math.hypot(pos.x - compassState.pencil.x, pos.y - compassState.pencil.y) < hitRadius) return 'resizing';
     if (Math.hypot(pos.x - compassState.center.x, pos.y - compassState.center.y) < hitRadius) return 'moving';
+
+    // Priorité 2: Branches
+    if (hinge) {
+        // La branche métallique déplace le compas
+        const distToMetalLeg = pointToLineSegmentDistance(pos, hinge, compassState.center);
+        if (distToMetalLeg < legHitThreshold) return 'moving';
+
+        // La branche du crayon change l'écartement
+        const distToPencilLeg = pointToLineSegmentDistance(pos, hinge, compassState.pencil);
+        if (distToPencilLeg < legHitThreshold) return 'resizing';
+    }
+
     return null;
 }
 
 export function drawCompass(ctx, compassState, isDraggingCompass, compassDragMode) {
+    // Isolate all drawing operations for the compass to prevent state leakage.
+    ctx.save();
+
     const center = compassState.center;
     const pencil = compassState.pencil;
 
     const hinge = calculateHinge(center, pencil);
-    if (!hinge) return;
+    if (!hinge) {
+        ctx.restore();
+        return;
+    }
 
     // --- 1. Calculer la géométrie ---
     const legWidthAtHinge = 8;
@@ -73,15 +95,71 @@ export function drawCompass(ctx, compassState, isDraggingCompass, compassDragMod
     drawLeg(pencil, false); // La branche du crayon est en bois
 
     // --- 3. Dessiner la charnière ---
-    ctx.fillStyle = '#A9A9A9';
+    ctx.lineWidth = 1; // Réinitialise l'épaisseur du trait
+    ctx.strokeStyle = '#696969';
+
+    // Plaque de base
+    ctx.fillStyle = '#A9A9A9'; // Gris foncé
     ctx.beginPath();
-    ctx.arc(hinge.x, hinge.y, hingeRadius, 0, 2 * Math.PI);
+    ctx.arc(hinge.x, hinge.y, 12, 0, 2 * Math.PI);
     ctx.fill();
     ctx.stroke();
+
+    // Plaque supérieure avec prise
+    ctx.fillStyle = '#D3D3D3'; // Gris clair
+    ctx.beginPath();
+    ctx.arc(hinge.x, hinge.y, 10, 0, 2 * Math.PI);
+    ctx.fill();
+    ctx.stroke();
+
+    // Lignes de prise
+    ctx.strokeStyle = '#808080';
+    for (let i = 0; i < 8; i++) {
+        const angle = i * (Math.PI / 4);
+        ctx.beginPath();
+        ctx.moveTo(hinge.x + 4 * Math.cos(angle), hinge.y + 4 * Math.sin(angle));
+        ctx.lineTo(hinge.x + 9 * Math.cos(angle), hinge.y + 9 * Math.sin(angle));
+        ctx.stroke();
+    }
+
+    // Vis centrale
     ctx.fillStyle = '#696969';
     ctx.beginPath();
-    ctx.arc(hinge.x, hinge.y, hingeRadius * 0.4, 0, 2 * Math.PI);
+    ctx.arc(hinge.x, hinge.y, 4, 0, 2 * Math.PI);
     ctx.fill();
+
+    // --- 3.5 Dessiner la tige de la charnière ---
+    const stemLength = 25;
+    const stemWidth = 6;
+    const midPoint = { x: (center.x + pencil.x) / 2, y: (center.y + pencil.y) / 2 };
+    const vecX = midPoint.x - hinge.x;
+    const vecY = midPoint.y - hinge.y;
+    const len = Math.hypot(vecX, vecY);
+
+    if (len > 1) {
+        const dirX = vecX / len; // "down" direction
+        const dirY = vecY / len;
+        const perpX = -dirY; // perpendicular to "down"
+        const perpY = dirX;
+
+        const p1 = { x: hinge.x + perpX * stemWidth / 2, y: hinge.y + perpY * stemWidth / 2 };
+        const p2 = { x: hinge.x - perpX * stemWidth / 2, y: hinge.y - perpY * stemWidth / 2 };
+        // La tige (poignée) doit être à l'extérieur, donc on va dans la direction opposée au milieu des pointes.
+        const p3 = { x: p2.x - dirX * stemLength, y: p2.y - dirY * stemLength };
+        const p4 = { x: p1.x - dirX * stemLength, y: p1.y - dirY * stemLength };
+
+        ctx.fillStyle = '#C0C0C0'; // Argenté
+        ctx.strokeStyle = '#696969';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(p1.x, p1.y);
+        ctx.lineTo(p2.x, p2.y);
+        ctx.lineTo(p3.x, p3.y);
+        ctx.lineTo(p4.x, p4.y);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+    }
 
     // --- 4. Dessiner la pointe ---
     const spikeSize = 10;
@@ -144,6 +222,8 @@ export function drawCompass(ctx, compassState, isDraggingCompass, compassDragMod
         ctx.closePath();
         ctx.fill();
     }
+
+    ctx.restore();
 }
 
 export function handleMouseDown(mousePos, compassState, compassDragStart, arcState) {
@@ -175,15 +255,31 @@ export function handleMouseDown(mousePos, compassState, compassDragStart, arcSta
     return { isDragging, dragMode };
 }
 
-export function handleMouseMove(currentMousePos, compassState, compassDragMode, compassDragStart, arcState) {
+export function handleMouseMove(currentMousePos, compassState, compassDragMode, compassDragStart, arcState, shapes, snap) {
+    let snapResult = { snapped: false };
     switch (compassDragMode) {
         case 'moving':
-            const newCenterX = currentMousePos.x - compassDragStart.dx;
-            const newCenterY = currentMousePos.y - compassDragStart.dy;
-            const moveDx = newCenterX - compassState.center.x;
-            const moveDy = newCenterY - compassState.center.y;
-            compassState.center.x = newCenterX;
-            compassState.center.y = newCenterY;
+            const potentialCenterX = currentMousePos.x - compassDragStart.dx;
+            const potentialCenterY = currentMousePos.y - compassDragStart.dy;
+
+            if (snap && shapes) {
+                snapResult = snap.getSnap({ x: potentialCenterX, y: potentialCenterY }, shapes);
+            }
+
+            let finalCenterX, finalCenterY;
+            if (snapResult.snapped && snapResult.type === 'point') {
+                finalCenterX = snapResult.position.x;
+                finalCenterY = snapResult.position.y;
+            } else {
+                finalCenterX = potentialCenterX;
+                finalCenterY = potentialCenterY;
+            }
+
+            const moveDx = finalCenterX - compassState.center.x;
+            const moveDy = finalCenterY - compassState.center.y;
+
+            compassState.center.x = finalCenterX;
+            compassState.center.y = finalCenterY;
             compassState.pencil.x += moveDx;
             compassState.pencil.y += moveDy;
             break;
@@ -191,18 +287,19 @@ export function handleMouseMove(currentMousePos, compassState, compassDragMode, 
             compassState.pencil = { ...currentMousePos };
             break;
         case 'rotating':
-            const dx = currentMousePos.x - compassState.center.x;
-            const dy = currentMousePos.y - compassState.center.y;
-            const angle = Math.atan2(dy, dx);
-            compassState.pencil.x = compassState.center.x + compassState.radius * Math.cos(angle);
-            compassState.pencil.y = compassState.center.y + compassState.radius * Math.sin(angle);
-            arcState.endAngle = angle;
+            const rotateDx = currentMousePos.x - compassState.center.x;
+            const rotateDy = currentMousePos.y - compassState.center.y;
+            const rotateAngle = Math.atan2(rotateDy, rotateDx);
+            compassState.pencil.x = compassState.center.x + compassState.radius * Math.cos(rotateAngle);
+            compassState.pencil.y = compassState.center.y + compassState.radius * Math.sin(rotateAngle);
+            arcState.endAngle = rotateAngle;
             break;
     }
     // Mettre à jour le rayon après un déplacement ou un redimensionnement
     const rdx = compassState.pencil.x - compassState.center.x;
     const rdy = compassState.pencil.y - compassState.center.y;
     compassState.radius = Math.hypot(rdx, rdy);
+    return snapResult;
 }
 
 export function handleMouseUp(compassDragMode, arcState, compassState, shapes, saveState) {

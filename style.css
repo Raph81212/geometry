@@ -65,6 +65,69 @@ button:hover {
     border-color: #0056b3;
 }
 
+/* Styles pour le sélecteur de couleur déroulant */
+#color-picker-wrapper {
+    position: relative;
+    align-items: center;
+}
+
+#color-palette-popup {
+    display: none; /* Caché par défaut */
+    position: absolute;
+    bottom: calc(100% + 5px); /* Au-dessus du bouton principal avec un petit espace */
+    left: 50%;
+    transform: translateX(-50%);
+    background-color: white;
+    padding: 8px;
+    border-radius: 8px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+    gap: 5px;
+    z-index: 10; /* S'assurer qu'il est au-dessus des autres éléments */
+}
+
+#color-picker-wrapper.open #color-palette-popup {
+    display: flex;
+}
+
+.color-swatch {
+    width: 25px;
+    height: 25px;
+    border-radius: 50%; /* Rend les boutons ronds */
+    border: 2px solid transparent; /* Bordure par défaut, changera pour la couleur active */
+    padding: 0;
+    cursor: pointer;
+    transition: border-color 0.2s, transform 0.1s;
+}
+
+.color-swatch:hover {
+    transform: scale(1.1); /* Agrandit légèrement au survol */
+}
+
+.color-swatch.active-color {
+    border-color: #007bff; /* Met en évidence la couleur active */
+    box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.5); /* Une légère lueur */
+}
+
+.color-swatch[data-color="#000000"] { background-color: #000000; }
+.color-swatch[data-color="#FF0000"] { background-color: #FF0000; }
+.color-swatch[data-color="#0000FF"] { background-color: #0000FF; }
+.color-swatch[data-color="#008000"] { background-color: #008000; }
+.color-swatch[data-color="#FFA500"] { background-color: #FFA500; }
+/* Styles pour les boutons à icônes */
+.tool-btn {
+    width: 40px;
+    height: 40px;
+    padding: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.tool-btn svg {
+    width: 100%;
+    height: 100%;
+    fill: currentColor;
+}
 /* Style for the record button when recording */
 #btn-record.recording {
     background-color: #dc3545; /* Red */
@@ -79,16 +142,6 @@ button:hover {
     font-size: 14px;
 }
 
-#color-picker {
-    -webkit-appearance: none;
-    -moz-appearance: none;
-    appearance: none;
-    width: 35px;
-    height: 25px;
-    background-color: transparent;
-    border: 1px solid #ccc;
-    cursor: pointer;
-}
 
 main {
     flex-grow: 1; /* Fait en sorte que la zone principale prenne l'espace vertical restant */
