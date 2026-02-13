@@ -32,12 +32,29 @@ document.addEventListener('DOMContentLoaded', () => {
     const colorSwatches = document.querySelectorAll('#color-palette-popup .color-swatch');
     const rulerOptions = document.getElementById('ruler-options');
     const rulerLengthInput = document.getElementById('ruler-length');
-    const gridSelect = document.getElementById('grid-select');
+    const gridButton = document.getElementById('btn-grid');
 
     // --- État de l'application ---
     const PIXELS_PER_CM = 37.8; // Constante pour un écran à 96 DPI
     let shapes = []; // Notre "modèle", la liste de toutes les formes dessinées
     let gridType = 'none'; // 'none', 'cm', 'orthonormal'
+    let currentGridIndex = 0;
+
+    const gridStates = [
+        {
+            type: 'none',
+            title: 'Grille : Aucune'
+        },
+        {
+            type: 'cm',
+            title: 'Grille : Carreaux'
+        },
+        {
+            type: 'orthonormal',
+            title: 'Grille : Repère'
+        }
+    ];
+
     // Piles pour l'historique des actions
     let undoStack = [];
     let redoStack = [];
@@ -393,6 +410,19 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    function updateGridButton() {
+        const state = gridStates[currentGridIndex];
+        gridButton.title = state.title;
+    }
+
+    function executeGridChange() {
+        currentGridIndex = (currentGridIndex + 1) % gridStates.length;
+        const newGridState = gridStates[currentGridIndex];
+        gridType = newGridState.type;
+        updateGridButton();
+        redrawCanvas();
+    }
+
     function updateColorDisplay() {
         currentColorDisplay.style.backgroundColor = currentColor;
         colorSwatches.forEach(swatch => {
@@ -420,6 +450,12 @@ document.addEventListener('DOMContentLoaded', () => {
         const newLength = parseInt(e.target.value, 10);
         recordEvent('ruler_length_change', { length: newLength });
         executeRulerLengthChange(newLength);
+    });
+
+    gridButton.addEventListener('click', () => {
+        if (isReplaying) return;
+        recordEvent('grid_change', {});
+        executeGridChange();
     });
 
     currentColorDisplay.addEventListener('click', (e) => {
@@ -1134,7 +1170,7 @@ document.addEventListener('DOMContentLoaded', () => {
             case 'mousemove':           executeMouseMove(event.data.pos); break;
             case 'mouseup':             executeMouseUp(event.data.pos); break;
             case 'color_change':        executeColorChange(event.data.color); break;
-            case 'color_change':        executeColorChange(event.data.color); break;
+            case 'grid_change':         executeGridChange(); break;
             case 'ruler_length_change': executeRulerLengthChange(event.data.length); break;
         }
 
@@ -1142,16 +1178,6 @@ document.addEventListener('DOMContentLoaded', () => {
             replayNextEvent(index + 1);
         }, delay);
     }
-
-    // --- Écouteurs d'événements pour l'historique ---
-
-    undoButton.addEventListener('click', undo);
-    redoButton.addEventListener('click', redo);
-
-    gridSelect.addEventListener('change', (e) => { // Correction: gridSelect est déjà défini
-        gridType = e.target.value; // Correction: e.target.value est la bonne propriété
-        redrawCanvas(); // Correction: redrawCanvas est la fonction à appeler
-    });
 
     // Bonus : Raccourcis clavier
     document.addEventListener('keydown', (e) => {
@@ -1169,11 +1195,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- Initialisation de la page ---
 
+    // --- Écouteurs d'événements pour l'historique ---
+    undoButton.addEventListener('click', undo);
+    redoButton.addEventListener('click', redo);
+
     // État initial des boutons au chargement de la page
     updateHistoryButtons();
     // Redimensionne le canvas une première fois
     resizeCanvas();
     updateColorDisplay(); // Initialise l'affichage de la couleur active
+    updateGridButton();
     // Ajoute un écouteur pour redimensionner quand la fenêtre change de taille
     window.addEventListener('resize', resizeCanvas);
 });
