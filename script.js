@@ -174,6 +174,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 drawLine(shape);
             } else if (shape.type === 'arc') {
                 drawArc(shape);
+            } else if (shape.type === 'text') {
+                drawText(shape);
             }
         });
 
@@ -242,6 +244,14 @@ document.addEventListener('DOMContentLoaded', () => {
         ctx.strokeStyle = arc.color || '#0000FF';
         ctx.lineWidth = 2;
         ctx.stroke();
+    }
+
+    function drawText(textShape) {
+        ctx.fillStyle = textShape.color || '#000000';
+        ctx.font = '16px sans-serif';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'top';
+        ctx.fillText(textShape.content, textShape.x, textShape.y);
     }
 
     function drawPoint(point) {
@@ -693,6 +703,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 const name = getPointName(pointNameCounter);
                 shapes.push({ type: 'point', x: mousePos.x, y: mousePos.y, name, color: currentColor });
                 redrawCanvas();
+                break;
+            case 'text':
+                const textContent = prompt("Entrez votre texte :");
+                if (textContent) { // N'ajoute rien si l'utilisateur annule
+                    saveState();
+                    shapes.push({ type: 'text', x: mousePos.x, y: mousePos.y, content: textContent, color: currentColor });
+                    redrawCanvas();
+                }
                 break;
             case 'line':
                 if (!isDrawingLine) {
