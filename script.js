@@ -924,12 +924,16 @@ document.addEventListener('DOMContentLoaded', () => {
         // Reset all dragging states to ensure a clean start
         isDraggingCompass = false;
         compassDragMode = null;
+        compassDragStart = {};
         isDraggingRuler = false;
         rulerDragMode = null;
+        rulerDragStart = {};
         isDraggingProtractor = false;
         protractorDragMode = null;
+        protractorDragStart = {};
         isDraggingSetSquare = false;
         setSquareDragMode = null;
+        setSquareDragStart = {};
 
         updateToolButtons();
         redrawCanvas();
