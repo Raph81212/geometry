@@ -53,3 +53,45 @@ export function pointToLineSegmentDistance(p, l1, l2) {
 
     return Math.hypot(p.x - projectionX, p.y - projectionY);
 }
+/**
+ * Projects a point onto an infinite line defined by two points.
+ * @param {{x: number, y: number}} p The point to project.
+ * @param {{x: number, y: number}} a The first point on the line.
+ * @param {{x: number, y: number}} b The second point on the line.
+ * @returns {{pos: {x: number, y: number}, t: number}} The projected point and its parametric value `t`.
+ */
+export function projectPointOnLine(p, a, b) {
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const lineLengthSq = dx * dx + dy * dy;
+
+    if (lineLengthSq === 0) return { pos: a, t: 0 };
+
+    const t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / lineLengthSq;
+
+    return {
+        pos: {
+            x: a.x + t * dx,
+            y: a.y + t * dy
+        },
+        t: t
+    };
+}
+
+/**
+ * Projects a point onto a line segment.
+ * @param {{x: number, y: number}} p The point to project.
+ * @param {{x: number, y: number}} a The start of the line segment.
+ * @param {{x: number, y: number}} b The end of the line segment.
+ * @returns {{x: number, y: number}} The projected point on the segment.
+ */
+export function projectPointOnSegment(p, a, b) {
+    const projection = projectPointOnLine(p, a, b);
+    // For a segment, we clamp the position to be between a and b.
+    const t = Math.max(0, Math.min(1, projection.t));
+
+    return {
+        x: a.x + t * (b.x - a.x),
+        y: a.y + t * (b.y - a.y)
+    };
+}

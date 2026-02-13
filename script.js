@@ -177,6 +177,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 ctx.strokeStyle = 'rgba(255, 0, 255, 0.7)';
                 ctx.lineWidth = 3;
                 ctx.stroke();
+            } else if (snapInfo.type === 'point_on_line') {
+                const pos = snapInfo.position;
+                ctx.beginPath();
+                ctx.arc(pos.x, pos.y, 10, 0, 2 * Math.PI); // Circle highlight for the new point
+                ctx.strokeStyle = 'rgba(255, 0, 255, 0.7)';
+                ctx.lineWidth = 3;
+                ctx.stroke();
             }
             ctx.restore();
         }
@@ -531,14 +538,25 @@ document.addEventListener('DOMContentLoaded', () => {
         currentMousePos = mousePos; // Mettre à jour l'état global pour le dessin des lignes temporaires
         snapInfo = null; // Réinitialise à chaque mouvement
 
-        // Si on dessine une ligne (libre ou sur un outil), on cherche à magnétiser le point final
-        if (lineToolState.isDrawing && (currentTool === 'segment' || currentTool === 'line')) {
+        if (currentTool === 'point') {
+            // When creating a point, we want to snap to lines/segments.
+            const snapResult = snap.getSnap(mousePos, shapes.filter(s => s.type === 'line'));
+            if (snapResult.snapped) {
+                const line = snapResult.snappedShape;
+                const projectedPoint = utils.projectPointOnSegment(mousePos, {x: line.x1, y: line.y1}, {x: line.x2, y: line.y2});
+                snapInfo = {
+                    snapped: true,
+                    type: 'point_on_line',
+                    position: projectedPoint,
+                    snappedShape: line
+                };
+            }
+        } else if (lineToolState.isDrawing && (currentTool === 'segment' || currentTool === 'line')) {
+            // When drawing a line/segment, we want to snap to existing points.
             const snapResult = snap.getSnap(mousePos, shapes);
             if (snapResult.snapped && snapResult.type === 'point') {
                 snapInfo = snapResult; // Mémorise l'info pour le surlignage et le dessin
             }
-        } else if (currentTool === 'line') { // This case should be covered by the above, but for safety
-            // This block is now redundant due to the combined line/segment tool logic
         } else {
             snapInfo = null;
         }
@@ -726,7 +744,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 saveState();
                 pointNameCounter++;
                 const name = utils.getPointName(pointNameCounter);
-                shapes.push({ type: 'point', x: mousePos.x, y: mousePos.y, name, color: currentColor });
+                
+                let finalPos = { x: mousePos.x, y: mousePos.y };
+                // If we have snap info from mouseMove, use it to place the point on the line
+                if (snapInfo && snapInfo.snapped && snapInfo.type === 'point_on_line') {
+                    finalPos = snapInfo.position;
+                }
+
+                shapes.push({ type: 'point', x: finalPos.x, y: finalPos.y, name, color: currentColor });
                 redrawCanvas();
                 break;
             case 'text':
@@ -779,7 +804,7 @@ document.addEventListener('DOMContentLoaded', () => {
             case 'segment': // Both segment and line modes are handled by the lineTool module
                 const newShape = lineTool.handleMouseDown({
                     mousePos, lineState: lineToolState, shapes, snap, canvas, currentColor,
-                    getPointName: () => utils.getPointName(pointNameCounter + 1), // Pass helper for point naming
+                    getPointName: () => utils.getPointName(pointNameCounter), // Pass helper for point naming
                     incrementPointCounter: () => pointNameCounter++ // Pass helper for counter increment
                 });
                 if (newShape) {
