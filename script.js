@@ -98,6 +98,11 @@ document.addEventListener('DOMContentLoaded', () => {
     let currentMousePos = null; // Pour le dessin en temps réel
     let snapInfo = null; // Pour magnétiser les outils
 
+    // --- État du déplacement de formes ---
+    let isDraggingShape = false;
+    let draggedShape = null;
+    let dragOffset = { x: 0, y: 0 };
+
     // --- Helper for recording ---
     function recordEvent(type, data) {
         if (!isRecording) return;
@@ -379,6 +384,32 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    /**
+     * Trouve une forme déplaçable (point, texte) à une position donnée.
+     * @param {{x: number, y: number}} pos - La position du curseur.
+     * @returns {object|null} La forme trouvée ou null.
+     */
+    function findMovableShapeAt(pos) {
+        // Itère en sens inverse pour sélectionner la forme la plus en surface
+        for (let i = shapes.length - 1; i >= 0; i--) {
+            const shape = shapes[i];
+            if (shape.type === 'point') {
+                const dist = Math.hypot(pos.x - shape.x, pos.y - shape.y);
+                if (dist < 10) { // Rayon de détection de 10px pour les points
+                    return shape;
+                }
+            } else if (shape.type === 'text') {
+                const textMetrics = ctx.measureText(shape.content);
+                const textWidth = textMetrics.width;
+                const textHeight = 16; // Basé sur la taille de police '16px'
+                if (pos.x >= shape.x && pos.x <= shape.x + textWidth && pos.y >= shape.y && pos.y <= shape.y + textHeight) {
+                    return shape;
+                }
+            }
+        }
+        return null;
+    }
+
     // --- Gestion de l'historique (Undo/Redo) ---
 
     /**
@@ -526,6 +557,8 @@ document.addEventListener('DOMContentLoaded', () => {
         protractorDragMode = null;
         isDraggingSetSquare = false;
         setSquareDragMode = null;
+        isDraggingShape = false;
+        draggedShape = null;
 
         // --- Update UI ---
         updateToolButtons();
@@ -581,32 +614,71 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         // --- Logique de changement de curseur ---
-        let cursorIsPencil = false;
-
-        // On veut le curseur crayon si:
-        // 1. On est en train de tracer une ligne (soit libre, soit sur un outil).
-        if (isDrawingLine) {
-            cursorIsPencil = true;
-        }
-        // 2. Ou si on n'est pas en train de tracer/glisser, mais qu'on survole un bord de dessin.
-        else {
-            const noDragActive = !isDraggingRuler && !isDraggingSetSquare && !isDraggingProtractor && !isDraggingCompass;
-            if (noDragActive) {
-                if (ruler.getRulerHit(mousePos, rulerState) === 'drawing-edge') {
-                    cursorIsPencil = true;
-                } else {
-                    const setSquareHit = setsquare.getSetSquareHit(mousePos, setSquareState);
-                    if (setSquareHit && setSquareHit.startsWith('drawing-edge')) {
+        let newCursor = 'default';
+        if (isDraggingShape) {
+            newCursor = 'move';
+        } else if (currentTool === 'move' && findMovableShapeAt(mousePos)) {
+            newCursor = 'move';
+        } else {
+            let cursorIsPencil = false;
+            if (isDrawingLine) {
+                cursorIsPencil = true;
+            } else {
+                const noDragActive = !isDraggingRuler && !isDraggingSetSquare && !isDraggingProtractor && !isDraggingCompass && !isDraggingShape;
+                if (noDragActive) {
+                    if (ruler.getRulerHit(mousePos, rulerState) === 'drawing-edge') {
                         cursorIsPencil = true;
+                    } else {
+                        const setSquareHit = setsquare.getSetSquareHit(mousePos, setSquareState);
+                        if (setSquareHit && setSquareHit.startsWith('drawing-edge')) {
+                            cursorIsPencil = true;
+                        }
                     }
                 }
             }
+            if (cursorIsPencil) {
+                newCursor = 'pencil';
+            }
         }
 
-        canvas.classList.toggle('pencil-cursor', cursorIsPencil);
+        if (newCursor === 'pencil') {
+            canvas.classList.add('pencil-cursor');
+            canvas.style.cursor = ''; // Laisse la classe CSS gérer le curseur
+        } else {
+            canvas.classList.remove('pencil-cursor');
+            canvas.style.cursor = newCursor;
+        }
         // --- Fin de la logique de changement de curseur ---
 
-        if (isDraggingCompass) {
+        if (isDraggingShape) {
+            const newX = mousePos.x - dragOffset.x;
+            const newY = mousePos.y - dragOffset.y;
+
+            // Si on déplace un point, on met à jour les lignes connectées
+            if (draggedShape.type === 'point') {
+                const oldX = draggedShape.x;
+                const oldY = draggedShape.y;
+
+                shapes.forEach(s => {
+                    if (s.type === 'line') {
+                        // Utilise une petite tolérance pour la comparaison des flottants
+                        if (Math.hypot(s.x1 - oldX, s.y1 - oldY) < 1) {
+                            s.x1 = newX;
+                            s.y1 = newY;
+                        }
+                        if (Math.hypot(s.x2 - oldX, s.y2 - oldY) < 1) {
+                            s.x2 = newX;
+                            s.y2 = newY;
+                        }
+                    }
+                });
+            }
+
+            // Met à jour la position de la forme déplacée
+            draggedShape.x = newX;
+            draggedShape.y = newY;
+            redrawCanvas();
+        } else if (isDraggingCompass) {
             compass.handleMouseMove(mousePos, compassState, compassDragMode, compassDragStart, arcState);
             redrawCanvas();
         } else if (isDraggingRuler) {
@@ -710,6 +782,16 @@ document.addEventListener('DOMContentLoaded', () => {
                     saveState();
                     shapes.push({ type: 'text', x: mousePos.x, y: mousePos.y, content: textContent, color: currentColor });
                     redrawCanvas();
+                }
+                break;
+            case 'move':
+                const shapeToDrag = findMovableShapeAt(mousePos);
+                if (shapeToDrag) {
+                    saveState(); // Sauvegarde l'état avant de commencer le déplacement
+                    isDraggingShape = true;
+                    draggedShape = shapeToDrag;
+                    dragOffset.x = mousePos.x - draggedShape.x;
+                    dragOffset.y = mousePos.y - draggedShape.y;
                 }
                 break;
             case 'line':
@@ -842,6 +924,11 @@ document.addEventListener('DOMContentLoaded', () => {
         if (isDraggingSetSquare) {
             isDraggingSetSquare = false;
             setSquareDragMode = null;
+            needsRedraw = true;
+        }
+        if (isDraggingShape) {
+            isDraggingShape = false;
+            draggedShape = null;
             needsRedraw = true;
         }
 
