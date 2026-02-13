@@ -26,9 +26,12 @@ document.addEventListener('DOMContentLoaded', () => {
     const colorPicker = document.getElementById('color-picker');
     const rulerOptions = document.getElementById('ruler-options');
     const rulerLengthInput = document.getElementById('ruler-length');
+    const gridSelect = document.getElementById('grid-select');
 
     // --- État de l'application ---
+    const PIXELS_PER_CM = 37.8; // Constante pour un écran à 96 DPI
     let shapes = []; // Notre "modèle", la liste de toutes les formes dessinées
+    let gridType = 'none'; // 'none', 'cm', 'orthonormal'
     // Piles pour l'historique des actions
     let undoStack = [];
     let redoStack = [];
@@ -149,6 +152,13 @@ document.addEventListener('DOMContentLoaded', () => {
      */
     function redrawCanvas() {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        // Draw grid based on gridType
+        if (gridType === 'cm') {
+            drawCmGrid();
+        } else if (gridType === 'orthonormal') {
+            drawOrthonormalGrid();
+        }
 
         // Dessine un surlignage pour la ligne/point magnétisé(e)
         if (snapInfo && snapInfo.snapped) {
@@ -382,6 +392,73 @@ document.addEventListener('DOMContentLoaded', () => {
                 ctx.stroke();
             }
         }
+    }
+
+    function drawCmGrid() {
+        ctx.beginPath();
+        ctx.strokeStyle = '#e0e0e0'; // Light grey for the grid
+        ctx.lineWidth = 0.5;
+
+        // Vertical lines
+        for (let x = 0; x < canvas.width; x += PIXELS_PER_CM) {
+            ctx.moveTo(x, 0);
+            ctx.lineTo(x, canvas.height);
+        }
+
+        // Horizontal lines
+        for (let y = 0; y < canvas.height; y += PIXELS_PER_CM) {
+            ctx.moveTo(0, y);
+            ctx.lineTo(canvas.width, y);
+        }
+
+        ctx.stroke();
+    }
+
+    function drawOrthonormalGrid() {
+        const originX = canvas.width / 2;
+        const originY = canvas.height / 2;
+        const tickSize = 5;
+
+        // Draw minor grid lines (the 1cm grid centered on the origin)
+        ctx.beginPath();
+        ctx.strokeStyle = '#f0f0f0'; // Very light grey for minor grid
+        ctx.lineWidth = 0.5;
+        for (let x = originX; x < canvas.width; x += PIXELS_PER_CM) { ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); }
+        for (let x = originX - PIXELS_PER_CM; x > 0; x -= PIXELS_PER_CM) { ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); }
+        for (let y = originY; y < canvas.height; y += PIXELS_PER_CM) { ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); }
+        for (let y = originY - PIXELS_PER_CM; y > 0; y -= PIXELS_PER_CM) { ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); }
+        ctx.stroke();
+
+        // Draw axes
+        ctx.beginPath();
+        ctx.strokeStyle = '#999999'; // A bit darker grey for the axes
+        ctx.lineWidth = 1.5;
+        ctx.moveTo(0, originY);
+        ctx.lineTo(canvas.width, originY); // X-axis
+        ctx.moveTo(originX, 0);
+        ctx.lineTo(originX, canvas.height); // Y-axis
+        ctx.stroke();
+
+        // Ticks and labels
+        ctx.fillStyle = '#666666';
+        ctx.font = '12px sans-serif';
+
+        // Labels on X-axis
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'top';
+        for (let i = 1; originX + i * PIXELS_PER_CM < canvas.width; i++) { ctx.fillText(i, originX + i * PIXELS_PER_CM, originY + tickSize + 2); }
+        for (let i = 1; originX - i * PIXELS_PER_CM > 0; i++) { ctx.fillText(-i, originX - i * PIXELS_PER_CM, originY + tickSize + 2); }
+
+        // Labels on Y-axis
+        ctx.textAlign = 'right';
+        ctx.textBaseline = 'middle';
+        for (let i = 1; originY - i * PIXELS_PER_CM > 0; i++) { ctx.fillText(i, originX - tickSize - 2, originY - i * PIXELS_PER_CM); }
+        for (let i = 1; originY + i * PIXELS_PER_CM < canvas.height; i++) { ctx.fillText(-i, originX - tickSize - 2, originY + i * PIXELS_PER_CM); }
+
+        // Origin label '0'
+        ctx.textAlign = 'right';
+        ctx.textBaseline = 'top';
+        ctx.fillText('0', originX - 5, originY + 5);
     }
 
     /**
@@ -1344,6 +1421,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     undoButton.addEventListener('click', undo);
     redoButton.addEventListener('click', redo);
+
+    gridSelect.addEventListener('change', (e) => {
+        gridType = e.target.value;
+        redrawCanvas();
+    });
 
     colorPicker.addEventListener('input', (e) => {
         currentColor = e.target.value;

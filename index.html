@@ -64,6 +64,14 @@
             <button id="btn-save-recording" title="Sauvegarder le film" aria-label="Sauvegarder le film" disabled>💾 Enregistrer film</button>
             <button id="btn-load-recording" title="Charger un film" aria-label="Charger un film">📂 Charger film</button>
         </div>
+        <div class="toolbar-row">
+            <label for="grid-select">Grille :</label>
+            <select id="grid-select">
+                <option value="none" selected>Aucune</option>
+                <option value="cm">Carreaux 1cm</option>
+                <option value="orthonormal">Repère orthonormé</option>
+            </select>
+        </div>
         <!-- Input caché pour le chargement de fichier -->
         <input type="file" id="file-loader" accept=".json" hidden>
         <input type="file" id="recording-loader" accept=".json" hidden>
