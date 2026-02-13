@@ -6,6 +6,8 @@ import * as snap from './snap.js';
 import * as utils from './utils.js';
 import * as grid from './grid.js';
 import * as drawing from './drawing.js';
+import { calculateLineCanvasIntersections } from './line-utils.js'; // Keep this for temporary drawing in script.js
+import * as lineTool from './tool-line-and-segment.js'; // Re-import the line tool module
 import * as shapeInteraction from './shape-interaction.js';
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -62,8 +64,11 @@ document.addEventListener('DOMContentLoaded', () => {
     let currentColor = '#000000'; // Couleur de dessin actuelle (noir par défaut)
 
     let currentTool = null;
-    let isDrawingLine = false; // Pour gérer le dessin de ligne en 2 clics
-    let lineStartPoint = null;
+    let lineToolState = { // Renamed from lineState to lineToolState to avoid conflict with local lineStartPoint
+        mode: 'segment', // 'segment' or 'line'
+        isDrawing: false,
+        startPoint: null,
+    };
     let isDrawingOnTool = false; // Pour tracer une ligne le long d'un outil
     let toolDrawingInfo = null; // { tool: 'ruler'|'setsquare', startPos: {x,y}, edge?: 'h'|'v' }
     // --- État du compas persistant ---
@@ -189,26 +194,26 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         // Dessine la ligne temporaire en cours de création
-        if (isDrawingLine && lineStartPoint && currentMousePos) {
+        if (currentTool === 'line' || currentTool === 'segment') { // Use the lineTool module for temporary drawing
+            lineTool.drawTemporaryShapes({ ctx, lineState: lineToolState, currentMousePos, canvas, currentColor });
+        } else if (isDrawingOnTool && lineToolState.startPoint && currentMousePos) {
+            // This block handles drawing along a tool (ruler/setsquare)
             let endPos = currentMousePos;
-            // Si on dessine le long d'un outil, on contraint le point final
-            if (isDrawingOnTool) {
-                if (toolDrawingInfo.tool === 'ruler') {
-                    endPos = ruler.projectOnEdge(currentMousePos, rulerState, false); // false pour prolonger
-                } else if (toolDrawingInfo.tool === 'setsquare') {
-                    endPos = setsquare.projectOnEdge(currentMousePos, setSquareState, toolDrawingInfo.edge, false); // false pour prolonger
-                }
+            if (toolDrawingInfo.tool === 'ruler') {
+                endPos = ruler.projectOnEdge(currentMousePos, rulerState, false); // false to extend
+            } else if (toolDrawingInfo.tool === 'setsquare') {
+                endPos = setsquare.projectOnEdge(currentMousePos, setSquareState, toolDrawingInfo.edge, false); // false to extend
             }
 
+            ctx.save();
             ctx.beginPath();
-            ctx.moveTo(lineStartPoint.x, lineStartPoint.y);
-            ctx.lineTo(endPos.x, endPos.y); // Utilise le point final (contraint ou non)
-            // Utilise la couleur actuelle avec de la transparence
-            ctx.strokeStyle = currentColor + '80'; // Ajoute 50% d'opacité (hex 80)
+            ctx.moveTo(lineToolState.startPoint.x, lineToolState.startPoint.y);
+            ctx.lineTo(endPos.x, endPos.y);
+            ctx.strokeStyle = currentColor + '80'; // semi-transparent
             ctx.lineWidth = 2;
-            ctx.setLineDash([5, 5]); // Ligne en pointillés
+            ctx.setLineDash([5, 5]);
             ctx.stroke();
-            ctx.setLineDash([]); // Réinitialise pour les prochains traits
+            ctx.restore();
         }
 
         // Dessine le compas s'il existe, et l'arc temporaire en cours de tracé
@@ -326,9 +331,27 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     function updateToolButtons() {
+        const segmentIcon = `<svg viewBox="0 0 24 24"><circle cx="4" cy="20" r="2"/><circle cx="20" cy="4" r="2"/><line x1="5.41" y1="18.59" x2="18.59" y2="5.41" stroke="currentColor" stroke-width="2"/></svg>`;
+        const lineIcon = `<svg viewBox="0 0 24 24"><path d="M21.71 3.29a1 1 0 0 0-1.42 0l-18 18a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l18-18a1 1 0 0 0 0-1.42z"/></svg>`;
+
         toolButtons.forEach(button => {
             const btnToolName = button.id.split('-')[1];
             let isActive = false;
+
+            // Special handling for the combined line/segment tool
+            if (button.id === 'tool-line') { // This is now the toggle button
+                if (currentTool === 'line' || currentTool === 'segment') {
+                    button.classList.add('active');
+                    button.innerHTML = (lineToolState.mode === 'segment') ? segmentIcon : lineIcon;
+                    button.title = (lineToolState.mode === 'segment') ? 'Segment (clic pour mode Droite)' : 'Droite (clic pour désactiver)';
+                } else {
+                    button.classList.remove('active');
+                    button.innerHTML = segmentIcon; // Default icon when not active
+                    button.title = 'Segment / Droite';
+                }
+                return; // Skip default active check for this button
+            }
+
             if (btnToolName === 'ruler') {
                 isActive = rulerState.visible;
             } else if (btnToolName === 'compass') {
@@ -342,7 +365,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 // Active if it's the current tool.
                 isActive = currentTool === btnToolName;
             }
-
             if (isActive) {
                 button.classList.add('active');
             } else {
@@ -359,7 +381,19 @@ document.addEventListener('DOMContentLoaded', () => {
      */
     function executeSetActiveTool(toolName) {
         // --- Handle Toggling Persistent Tools ---
-        if (toolName === 'ruler') {
+        if (toolName === 'line') { // This is now the toggle button for segment/line
+            if (currentTool !== 'line' && currentTool !== 'segment') { // If neither is active, activate segment mode
+                currentTool = 'segment';
+                lineToolState.mode = 'segment';
+            } else if (currentTool === 'segment') { // If segment is active, switch to line mode
+                currentTool = 'line';
+                lineToolState.mode = 'line';
+            } else { // If line is active, deactivate both
+                currentTool = null;
+                lineToolState.mode = 'segment'; // Reset to default for next activation
+            }
+            lineTool.resetState(lineToolState); // Reset drawing state for the tool
+        } else if (toolName === 'ruler') {
             rulerState.visible = !rulerState.visible;
             rulerOptions.style.display = rulerState.visible ? 'flex' : 'none';
         } else if (toolName === 'protractor') {
@@ -377,14 +411,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 // If compass is not on screen, set it as the active tool to be placed.
                 currentTool = 'compass';
             }
-        } else { // For 'point', 'line'
+        } else { // For 'point', 'mark', 'text', 'move', 'eraser'
             // If we click the same tool again, deselect it. Otherwise, select it.
             currentTool = (currentTool === toolName) ? null : toolName;
         }
 
         // --- Stop any ongoing drag operations ---
-        isDrawingLine = false;
-        lineStartPoint = null;
+        lineTool.resetState(lineToolState); // Ensure the line tool state is reset
         isDraggingCompass = false;
         compassDragMode = null;
         isDraggingRuler = false;
@@ -499,11 +532,15 @@ document.addEventListener('DOMContentLoaded', () => {
         snapInfo = null; // Réinitialise à chaque mouvement
 
         // Si on dessine une ligne (libre ou sur un outil), on cherche à magnétiser le point final
-        if (isDrawingLine) {
+        if (lineToolState.isDrawing && (currentTool === 'segment' || currentTool === 'line')) {
             const snapResult = snap.getSnap(mousePos, shapes);
             if (snapResult.snapped && snapResult.type === 'point') {
                 snapInfo = snapResult; // Mémorise l'info pour le surlignage et le dessin
             }
+        } else if (currentTool === 'line') { // This case should be covered by the above, but for safety
+            // This block is now redundant due to the combined line/segment tool logic
+        } else {
+            snapInfo = null;
         }
 
         // --- Logique de changement de curseur ---
@@ -516,7 +553,7 @@ document.addEventListener('DOMContentLoaded', () => {
             newCursor = 'crosshair';
         } else {
             let cursorIsPencil = false;
-            if (isDrawingLine) {
+            if (lineToolState.isDrawing && (currentTool === 'segment' || currentTool === 'line')) {
                 cursorIsPencil = true;
             } else {
                 const noDragActive = !isDraggingRuler && !isDraggingSetSquare && !isDraggingProtractor && !isDraggingCompass && !isDraggingShape;
@@ -584,8 +621,8 @@ document.addEventListener('DOMContentLoaded', () => {
             redrawCanvas();
         } else if (isDraggingSetSquare) {
             snapInfo = setsquare.handleMouseMove(mousePos, setSquareState, setSquareDragMode, setSquareDragStart, shapes, snap);
-            redrawCanvas();
-        } else if (isDrawingLine) {
+            redrawCanvas(); // This was the missing redraw for setsquare
+        } else if (lineToolState.isDrawing) {
             redrawCanvas();
         }
     }
@@ -612,8 +649,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 const startPos = ruler.projectOnEdge(mousePos, rulerState);
                 toolDrawingInfo = { tool: 'ruler', startPos };
                 // On utilise les variables existantes pour le tracé temporaire
-                isDrawingLine = true;
-                lineStartPoint = startPos;
+                lineToolState.isDrawing = true;
+                lineToolState.startPoint = startPos;
             } else {
                 const result = ruler.handleMouseDown(mousePos, rulerState, rulerDragStart);
                 isDraggingRuler = result.isDragging;
@@ -650,8 +687,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 const startPos = setsquare.projectOnEdge(mousePos, setSquareState, edgeType);
                 toolDrawingInfo = { tool: 'setsquare', startPos, edge: edgeType };
                 // On utilise les variables existantes pour le tracé temporaire
-                isDrawingLine = true;
-                lineStartPoint = startPos;
+                lineToolState.isDrawing = true;
+                lineToolState.startPoint = startPos;
             } else {
                 // If we are about to interact with the set square, check its current snap status
                 const currentSnapInfo = snap.getSnap({ x: setSquareState.cornerX, y: setSquareState.cornerY }, shapes);
@@ -718,31 +755,18 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 break;
             case 'line':
-                if (!isDrawingLine) {
-                    // Premier clic : début de la ligne
-                    isDrawingLine = true;
-                    // Magnétise le point de départ s'il est proche d'un point existant
-                    const snapResult = snap.getSnap(mousePos, shapes);
-                    if (snapResult.snapped && snapResult.type === 'point') {
-                        lineStartPoint = snapResult.position;
-                    } else {
-                        lineStartPoint = { x: mousePos.x, y: mousePos.y };
-                    }
-                } else {
-                    // Deuxième clic : fin de la ligne
+            case 'segment': // Both segment and line modes are handled by the lineTool module
+                const newShape = lineTool.handleMouseDown({
+                    mousePos, lineState: lineToolState, shapes, snap, canvas, currentColor,
+                    getPointName: () => utils.getPointName(pointNameCounter + 1), // Pass helper for point naming
+                    incrementPointCounter: () => pointNameCounter++ // Pass helper for counter increment
+                });
+                if (newShape) {
                     saveState();
-                    let endPos = { x: mousePos.x, y: mousePos.y };
-                    // Magnétise le point d'arrivée s'il est proche d'un point existant
-                    const snapResult = snap.getSnap(mousePos, shapes);
-                    if (snapResult.snapped && snapResult.type === 'point') {
-                        endPos = snapResult.position;
-                    }
-                    shapes.push({ type: 'line', x1: lineStartPoint.x, y1: lineStartPoint.y, x2: endPos.x, y2: endPos.y, color: currentColor });
-                    isDrawingLine = false;
-                    lineStartPoint = null;
-                    snapInfo = null; // Nettoie l'info de magnétisme pour enlever le surlignage
-                    redrawCanvas();
+                    shapes.push(newShape);
                 }
+                snapInfo = null; // Clear snap info after action
+                redrawCanvas();
                 break;
             case 'mark':
                 const snapResult = snap.getSnap(mousePos, shapes);
@@ -823,8 +847,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
             isDrawingOnTool = false;
             toolDrawingInfo = null;
-            isDrawingLine = false;
-            lineStartPoint = null;
+            lineTool.resetState(lineToolState); // Reset line tool state
+            // isDrawingSegment and segmentStartPoint are now managed by lineToolState
             needsRedraw = true;
         }
 
@@ -873,7 +897,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
             shapes = [];
             pointNameCounter = 0; // Réinitialise le compteur de noms
-            isDrawingLine = false;
+            lineTool.resetState(lineToolState); // Reset line tool state
             compassState = { center: null, radius: 0, pencil: null }; // Efface aussi le compas
             rulerState.visible = false; // Cache la règle
             protractorState.visible = false; // Cache le rapporteur
@@ -1105,7 +1129,8 @@ document.addEventListener('DOMContentLoaded', () => {
         rulerLengthInput.value = 10; // Reset ruler length input
 
         currentTool = null;
-        isDrawingLine = false;
+        lineTool.resetState(lineToolState); // Reset line tool state
+        // isDrawingSegment, segmentStartPoint, lineStartPoint are now managed by lineToolState
 
         // Reset all dragging states to ensure a clean start
         isDraggingCompass = false;
