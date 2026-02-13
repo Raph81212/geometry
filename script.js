@@ -385,6 +385,32 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     /**
+     * Calculates the distance from a point (p) to a line segment defined by l1 and l2.
+     * @param {{x: number, y: number}} p The point.
+     * @param {{x: number, y: number}} l1 The start of the line segment.
+     * @param {{x: number, y: number}} l2 The end of the line segment.
+     * @returns {number} The perpendicular distance to the line segment.
+     */
+    function pointToLineSegmentDistance(p, l1, l2) {
+        const dx = l2.x - l1.x;
+        const dy = l2.y - l1.y;
+        const lineLengthSq = dx * dx + dy * dy;
+
+        if (lineLengthSq === 0) {
+            return Math.hypot(p.x - l1.x, p.y - l1.y);
+        }
+
+        // t is the projection of p onto the line, as a factor of the segment length
+        let t = ((p.x - l1.x) * dx + (p.y - l1.y) * dy) / lineLengthSq;
+        t = Math.max(0, Math.min(1, t)); // Clamp to the segment
+
+        const projectionX = l1.x + t * dx;
+        const projectionY = l1.y + t * dy;
+
+        return Math.hypot(p.x - projectionX, p.y - projectionY);
+    }
+
+    /**
      * Trouve une forme déplaçable (point, texte) à une position donnée.
      * @param {{x: number, y: number}} pos - La position du curseur.
      * @returns {object|null} La forme trouvée ou null.
@@ -403,6 +429,37 @@ document.addEventListener('DOMContentLoaded', () => {
                 const textWidth = textMetrics.width;
                 const textHeight = 16; // Basé sur la taille de police '16px'
                 if (pos.x >= shape.x && pos.x <= shape.x + textWidth && pos.y >= shape.y && pos.y <= shape.y + textHeight) {
+                    return shape;
+                }
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Trouve une forme (point, texte, ligne) à une position donnée.
+     * @param {{x: number, y: number}} pos - La position du curseur.
+     * @returns {object|null} La forme trouvée ou null.
+     */
+    function findShapeAt(pos) {
+        // Itère en sens inverse pour sélectionner la forme la plus en surface
+        for (let i = shapes.length - 1; i >= 0; i--) {
+            const shape = shapes[i];
+            if (shape.type === 'point') {
+                const dist = Math.hypot(pos.x - shape.x, pos.y - shape.y);
+                if (dist < 10) { // Rayon de détection de 10px
+                    return shape;
+                }
+            } else if (shape.type === 'text') {
+                const textMetrics = ctx.measureText(shape.content);
+                const textWidth = textMetrics.width;
+                const textHeight = 16; // Basé sur la taille de police '16px'
+                if (pos.x >= shape.x && pos.x <= shape.x + textWidth && pos.y >= shape.y && pos.y <= shape.y + textHeight) {
+                    return shape;
+                }
+            } else if (shape.type === 'line') {
+                const dist = pointToLineSegmentDistance(pos, { x: shape.x1, y: shape.y1 }, { x: shape.x2, y: shape.y2 });
+                if (dist < 10) { // Tolérance de 10px pour cliquer sur une ligne
                     return shape;
                 }
             }
@@ -619,6 +676,8 @@ document.addEventListener('DOMContentLoaded', () => {
             newCursor = 'move';
         } else if (currentTool === 'move' && findMovableShapeAt(mousePos)) {
             newCursor = 'move';
+        } else if (currentTool === 'eraser' && findShapeAt(mousePos)) {
+            newCursor = 'crosshair';
         } else {
             let cursorIsPencil = false;
             if (isDrawingLine) {
@@ -792,6 +851,34 @@ document.addEventListener('DOMContentLoaded', () => {
                     draggedShape = shapeToDrag;
                     dragOffset.x = mousePos.x - draggedShape.x;
                     dragOffset.y = mousePos.y - draggedShape.y;
+                }
+                break;
+            case 'eraser':
+                const shapeToDelete = findShapeAt(mousePos);
+                if (shapeToDelete) {
+                    saveState();
+
+                    if (shapeToDelete.type === 'point') {
+                        const pointX = shapeToDelete.x;
+                        const pointY = shapeToDelete.y;
+                        // Filter out the point and any connected lines
+                        shapes = shapes.filter(s => {
+                            if (s === shapeToDelete) return false; // Remove the point itself
+                            if (s.type === 'line') {
+                                const isConnected = (Math.hypot(s.x1 - pointX, s.y1 - pointY) < 1) ||
+                                    (Math.hypot(s.x2 - pointX, s.y2 - pointY) < 1);
+                                return !isConnected; // Keep the line if it's NOT connected
+                            }
+                            return true; // Keep other shapes
+                        });
+                    } else {
+                        // For lines, text, etc., just remove the single shape
+                        const index = shapes.indexOf(shapeToDelete);
+                        if (index > -1) {
+                            shapes.splice(index, 1);
+                        }
+                    }
+                    redrawCanvas();
                 }
                 break;
             case 'line':
