@@ -3,6 +3,10 @@ import * as ruler from './tool-ruler.js';
 import * as protractor from './tool-protractor.js';
 import * as setsquare from './tool-setsquare.js';
 import * as snap from './snap.js';
+import * as utils from './utils.js';
+import * as grid from './grid.js';
+import * as drawing from './drawing.js';
+import * as shapeInteraction from './shape-interaction.js';
 
 document.addEventListener('DOMContentLoaded', () => {
     // --- Initialisation ---
@@ -119,35 +123,6 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- Fonctions de dessin ---
 
     /**
-     * Convertit un nombre en une séquence de lettres majuscules (1->A, 2->B, 27->AA).
-     * @param {number} n - Le numéro du point.
-     * @returns {string} Le nom du point.
-     */
-    function getPointName(n) {
-        if (n <= 0) return '';
-        // Le nombre de primes (A', A'', etc.)
-        const primeCount = Math.floor((n - 1) / 26);
-        // L'index de la lettre (0 pour A, 25 pour Z)
-        const letterIndex = (n - 1) % 26;
-        const letter = String.fromCharCode(65 + letterIndex);
-        const primes = "'".repeat(primeCount);
-        return letter + primes;
-    }
-
-    /**
-     * Convertit un nom de point (ex: 'A', 'B', 'AA') en son numéro séquentiel.
-     * @param {string} name - Le nom du point.
-     * @returns {number} Le numéro du point.
-     */
-    function getPointNumber(name) {
-        if (!name || name.length === 0) return 0;
-        const letter = name.charAt(0);
-        const primeCount = name.length - 1;
-        const letterValue = letter.charCodeAt(0) - 65; // A=0, B=1...
-        return primeCount * 26 + letterValue + 1;
-    }
-
-    /**
      * Efface et redessine tout le canvas à partir de la liste `shapes`.
      */
     function redrawCanvas() {
@@ -155,9 +130,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Draw grid based on gridType
         if (gridType === 'cm') {
-            drawCmGrid();
+            grid.drawCmGrid(ctx, canvas.width, canvas.height, PIXELS_PER_CM);
         } else if (gridType === 'orthonormal') {
-            drawOrthonormalGrid();
+            grid.drawOrthonormalGrid(ctx, canvas.width, canvas.height, PIXELS_PER_CM);
         }
 
         // Dessine un surlignage pour la ligne/point magnétisé(e)
@@ -184,13 +159,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
         shapes.forEach(shape => {
             if (shape.type === 'point') {
-                drawPoint(shape);
+                drawing.drawPoint(ctx, shape, shapes);
             } else if (shape.type === 'line') {
-                drawLine(shape);
+                drawing.drawLine(ctx, shape);
             } else if (shape.type === 'arc') {
-                drawArc(shape);
+                drawing.drawArc(ctx, shape);
             } else if (shape.type === 'text') {
-                drawText(shape);
+                drawing.drawText(ctx, shape);
             }
         });
 
@@ -251,297 +226,6 @@ document.addEventListener('DOMContentLoaded', () => {
         canvas.height = canvas.offsetHeight;
         shapes = shapesToRedraw;
         redrawCanvas();
-    }
-
-    function drawArc(arc) {
-        ctx.beginPath();
-        ctx.arc(arc.cx, arc.cy, arc.radius, arc.startAngle, arc.endAngle);
-        ctx.strokeStyle = arc.color || '#0000FF';
-        ctx.lineWidth = 2;
-        ctx.stroke();
-    }
-
-    function drawText(textShape) {
-        ctx.fillStyle = textShape.color || '#000000';
-        ctx.font = '16px sans-serif';
-        ctx.textAlign = 'left';
-        ctx.textBaseline = 'top';
-        ctx.fillText(textShape.content, textShape.x, textShape.y);
-    }
-
-    function drawPoint(point) {
-        const crossSize = 6; // Taille des branches de la croix
-
-        // Dessine la croix (diagonale)
-        ctx.beginPath();
-        ctx.moveTo(point.x - crossSize, point.y - crossSize);
-        ctx.lineTo(point.x + crossSize, point.y + crossSize);
-        ctx.moveTo(point.x + crossSize, point.y - crossSize);
-        ctx.lineTo(point.x - crossSize, point.y + crossSize);
-        ctx.strokeStyle = point.color || '#000000';
-        ctx.lineWidth = 2;
-        ctx.stroke();
-
-        // Dessine le nom du point
-        ctx.fillStyle = point.color || '#000000';
-        ctx.font = '14px sans-serif';
-        ctx.textAlign = 'left';
-        ctx.textBaseline = 'bottom';
-        // Affiche le nom à côté de la croix
-        ctx.fillText(point.name, point.x + crossSize + 3, point.y - crossSize);
-
-        // --- DESSIN DU CODAGE D'ANGLE ---
-        if (point.angleMark) {
-            const connectedLines = shapes.filter(s =>
-                s.type === 'line' &&
-                (
-                    (Math.hypot(s.x1 - point.x, s.y1 - point.y) < 1) ||
-                    (Math.hypot(s.x2 - point.x, s.y2 - point.y) < 1)
-                )
-            );
-
-            if (connectedLines.length === 2) {
-                const line1 = connectedLines[0];
-                const line2 = connectedLines[1];
-
-                // Get vectors pointing away from the point
-                const v1 = (Math.hypot(line1.x1 - point.x, line1.y1 - point.y) < 1)
-                    ? { x: line1.x2 - point.x, y: line1.y2 - point.y }
-                    : { x: line1.x1 - point.x, y: line1.y1 - point.y };
-
-                const v2 = (Math.hypot(line2.x1 - point.x, line2.y1 - point.y) < 1)
-                    ? { x: line2.x2 - point.x, y: line2.y2 - point.y }
-                    : { x: line2.x1 - point.x, y: line2.y1 - point.y };
-
-                const angle1 = Math.atan2(v1.y, v1.x);
-                const angle2 = Math.atan2(v2.y, v2.x);
-
-                ctx.strokeStyle = point.color || '#000000';
-                ctx.lineWidth = 1.5;
-
-                const markRadius = 25;
-
-                if (point.angleMark.type === 'right') {
-                    const size = 15;
-                    const p1 = { x: point.x + size * Math.cos(angle1), y: point.y + size * Math.sin(angle1) };
-                    const p3 = { x: point.x + size * Math.cos(angle2), y: point.y + size * Math.sin(angle2) };
-                    const p2 = { x: p1.x + (p3.x - point.x), y: p1.y + (p3.y - point.y) };
-
-                    ctx.beginPath();
-                    ctx.moveTo(p1.x, p1.y);
-                    ctx.lineTo(p2.x, p2.y);
-                    ctx.lineTo(p3.x, p3.y);
-                    ctx.stroke();
-                } else { // 'single' or 'double' arc
-                    let startAngle = angle1, endAngle = angle2;
-                    if ((endAngle - startAngle + 2 * Math.PI) % (2 * Math.PI) > Math.PI) {
-                        [startAngle, endAngle] = [endAngle, startAngle];
-                    }
-                    ctx.beginPath();
-                    ctx.arc(point.x, point.y, markRadius, startAngle, endAngle);
-                    ctx.stroke();
-                    if (point.angleMark.type === 'double') {
-                        ctx.beginPath();
-                        ctx.arc(point.x, point.y, markRadius + 4, startAngle, endAngle);
-                        ctx.stroke();
-                    }
-                }
-            }
-        }
-    }
-
-    function drawLine(line) {
-        ctx.beginPath();
-        ctx.moveTo(line.x1, line.y1);
-        ctx.lineTo(line.x2, line.y2);
-        ctx.lineWidth = 2;
-        ctx.stroke();
-
-        // --- DESSIN DU CODAGE DE LONGUEUR ---
-        if (line.marking && line.marking > 0) {
-            const midX = (line.x1 + line.x2) / 2;
-            const midY = (line.y1 + line.y2) / 2;
-            const dx = line.x2 - line.x1;
-            const dy = line.y2 - line.y1;
-            const length = Math.hypot(dx, dy);
-            if (length === 0) return;
-
-            const perpX = -dy / length;
-            const perpY = dx / length;
-            const tickLength = 10;
-            const tickSpacing = 4;
-
-            const totalWidth = (line.marking - 1) * tickSpacing;
-            const startOffset = -totalWidth / 2;
-
-            ctx.strokeStyle = line.color || '#000000';
-            ctx.lineWidth = 2;
-
-            for (let i = 0; i < line.marking; i++) {
-                const offset = startOffset + i * tickSpacing;
-                const tickCenterX = midX + (dx / length) * offset;
-                const tickCenterY = midY + (dy / length) * offset;
-                const tickStartX = tickCenterX + perpX * tickLength / 2;
-                const tickStartY = tickCenterY + perpY * tickLength / 2;
-                const tickEndX = tickCenterX - perpX * tickLength / 2;
-                const tickEndY = tickCenterY - perpY * tickLength / 2;
-
-                ctx.beginPath();
-                ctx.moveTo(tickStartX, tickStartY);
-                ctx.lineTo(tickEndX, tickEndY);
-                ctx.stroke();
-            }
-        }
-    }
-
-    function drawCmGrid() {
-        ctx.beginPath();
-        ctx.strokeStyle = '#e0e0e0'; // Light grey for the grid
-        ctx.lineWidth = 0.5;
-
-        // Vertical lines
-        for (let x = 0; x < canvas.width; x += PIXELS_PER_CM) {
-            ctx.moveTo(x, 0);
-            ctx.lineTo(x, canvas.height);
-        }
-
-        // Horizontal lines
-        for (let y = 0; y < canvas.height; y += PIXELS_PER_CM) {
-            ctx.moveTo(0, y);
-            ctx.lineTo(canvas.width, y);
-        }
-
-        ctx.stroke();
-    }
-
-    function drawOrthonormalGrid() {
-        const originX = canvas.width / 2;
-        const originY = canvas.height / 2;
-        const tickSize = 5;
-
-        // Draw minor grid lines (the 1cm grid centered on the origin)
-        ctx.beginPath();
-        ctx.strokeStyle = '#f0f0f0'; // Very light grey for minor grid
-        ctx.lineWidth = 0.5;
-        for (let x = originX; x < canvas.width; x += PIXELS_PER_CM) { ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); }
-        for (let x = originX - PIXELS_PER_CM; x > 0; x -= PIXELS_PER_CM) { ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); }
-        for (let y = originY; y < canvas.height; y += PIXELS_PER_CM) { ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); }
-        for (let y = originY - PIXELS_PER_CM; y > 0; y -= PIXELS_PER_CM) { ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); }
-        ctx.stroke();
-
-        // Draw axes
-        ctx.beginPath();
-        ctx.strokeStyle = '#999999'; // A bit darker grey for the axes
-        ctx.lineWidth = 1.5;
-        ctx.moveTo(0, originY);
-        ctx.lineTo(canvas.width, originY); // X-axis
-        ctx.moveTo(originX, 0);
-        ctx.lineTo(originX, canvas.height); // Y-axis
-        ctx.stroke();
-
-        // Ticks and labels
-        ctx.fillStyle = '#666666';
-        ctx.font = '12px sans-serif';
-
-        // Labels on X-axis
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'top';
-        for (let i = 1; originX + i * PIXELS_PER_CM < canvas.width; i++) { ctx.fillText(i, originX + i * PIXELS_PER_CM, originY + tickSize + 2); }
-        for (let i = 1; originX - i * PIXELS_PER_CM > 0; i++) { ctx.fillText(-i, originX - i * PIXELS_PER_CM, originY + tickSize + 2); }
-
-        // Labels on Y-axis
-        ctx.textAlign = 'right';
-        ctx.textBaseline = 'middle';
-        for (let i = 1; originY - i * PIXELS_PER_CM > 0; i++) { ctx.fillText(i, originX - tickSize - 2, originY - i * PIXELS_PER_CM); }
-        for (let i = 1; originY + i * PIXELS_PER_CM < canvas.height; i++) { ctx.fillText(-i, originX - tickSize - 2, originY + i * PIXELS_PER_CM); }
-
-        // Origin label '0'
-        ctx.textAlign = 'right';
-        ctx.textBaseline = 'top';
-        ctx.fillText('0', originX - 5, originY + 5);
-    }
-
-    /**
-     * Calculates the distance from a point (p) to a line segment defined by l1 and l2.
-     * @param {{x: number, y: number}} p The point.
-     * @param {{x: number, y: number}} l1 The start of the line segment.
-     * @param {{x: number, y: number}} l2 The end of the line segment.
-     * @returns {number} The perpendicular distance to the line segment.
-     */
-    function pointToLineSegmentDistance(p, l1, l2) {
-        const dx = l2.x - l1.x;
-        const dy = l2.y - l1.y;
-        const lineLengthSq = dx * dx + dy * dy;
-
-        if (lineLengthSq === 0) {
-            return Math.hypot(p.x - l1.x, p.y - l1.y);
-        }
-
-        // t is the projection of p onto the line, as a factor of the segment length
-        let t = ((p.x - l1.x) * dx + (p.y - l1.y) * dy) / lineLengthSq;
-        t = Math.max(0, Math.min(1, t)); // Clamp to the segment
-
-        const projectionX = l1.x + t * dx;
-        const projectionY = l1.y + t * dy;
-
-        return Math.hypot(p.x - projectionX, p.y - projectionY);
-    }
-
-    /**
-     * Trouve une forme déplaçable (point, texte) à une position donnée.
-     * @param {{x: number, y: number}} pos - La position du curseur.
-     * @returns {object|null} La forme trouvée ou null.
-     */
-    function findMovableShapeAt(pos) {
-        // Itère en sens inverse pour sélectionner la forme la plus en surface
-        for (let i = shapes.length - 1; i >= 0; i--) {
-            const shape = shapes[i];
-            if (shape.type === 'point') {
-                const dist = Math.hypot(pos.x - shape.x, pos.y - shape.y);
-                if (dist < 10) { // Rayon de détection de 10px pour les points
-                    return shape;
-                }
-            } else if (shape.type === 'text') {
-                const textMetrics = ctx.measureText(shape.content);
-                const textWidth = textMetrics.width;
-                const textHeight = 16; // Basé sur la taille de police '16px'
-                if (pos.x >= shape.x && pos.x <= shape.x + textWidth && pos.y >= shape.y && pos.y <= shape.y + textHeight) {
-                    return shape;
-                }
-            }
-        }
-        return null;
-    }
-
-    /**
-     * Trouve une forme (point, texte, ligne) à une position donnée.
-     * @param {{x: number, y: number}} pos - La position du curseur.
-     * @returns {object|null} La forme trouvée ou null.
-     */
-    function findShapeAt(pos) {
-        // Itère en sens inverse pour sélectionner la forme la plus en surface
-        for (let i = shapes.length - 1; i >= 0; i--) {
-            const shape = shapes[i];
-            if (shape.type === 'point') {
-                const dist = Math.hypot(pos.x - shape.x, pos.y - shape.y);
-                if (dist < 10) { // Rayon de détection de 10px
-                    return shape;
-                }
-            } else if (shape.type === 'text') {
-                const textMetrics = ctx.measureText(shape.content);
-                const textWidth = textMetrics.width;
-                const textHeight = 16; // Basé sur la taille de police '16px'
-                if (pos.x >= shape.x && pos.x <= shape.x + textWidth && pos.y >= shape.y && pos.y <= shape.y + textHeight) {
-                    return shape;
-                }
-            } else if (shape.type === 'line') {
-                const dist = pointToLineSegmentDistance(pos, { x: shape.x1, y: shape.y1 }, { x: shape.x2, y: shape.y2 });
-                if (dist < 10) { // Tolérance de 10px pour cliquer sur une ligne
-                    return shape;
-                }
-            }
-        }
-        return null;
     }
 
     // --- Gestion de l'historique (Undo/Redo) ---
@@ -613,7 +297,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const nextState = redoStack.pop();
             shapes = nextState.shapes;
             pointNameCounter = nextState.pointNameCounter;
-            compassState = nextState.compassState;
+            compassState = nextState.compassState; 
             rulerState = nextState.rulerState;
             setSquareState = nextState.setSquareState;
             protractorState = nextState.protractorState;
@@ -751,9 +435,9 @@ document.addEventListener('DOMContentLoaded', () => {
         let newCursor = 'default';
         if (isDraggingShape) {
             newCursor = 'move';
-        } else if (currentTool === 'move' && findMovableShapeAt(mousePos)) {
+        } else if (currentTool === 'move' && shapeInteraction.findMovableShapeAt(mousePos, shapes, ctx)) {
             newCursor = 'move';
-        } else if (currentTool === 'eraser' && findShapeAt(mousePos)) {
+        } else if (currentTool === 'eraser' && shapeInteraction.findShapeAt(mousePos, shapes, ctx)) {
             newCursor = 'crosshair';
         } else {
             let cursorIsPencil = false;
@@ -908,7 +592,7 @@ document.addEventListener('DOMContentLoaded', () => {
             case 'point':
                 saveState();
                 pointNameCounter++;
-                const name = getPointName(pointNameCounter);
+                const name = utils.getPointName(pointNameCounter);
                 shapes.push({ type: 'point', x: mousePos.x, y: mousePos.y, name, color: currentColor });
                 redrawCanvas();
                 break;
@@ -921,7 +605,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 break;
             case 'move':
-                const shapeToDrag = findMovableShapeAt(mousePos);
+                const shapeToDrag = shapeInteraction.findMovableShapeAt(mousePos, shapes, ctx);
                 if (shapeToDrag) {
                     saveState(); // Sauvegarde l'état avant de commencer le déplacement
                     isDraggingShape = true;
@@ -931,7 +615,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
                 break;
             case 'eraser':
-                const shapeToDelete = findShapeAt(mousePos);
+                const shapeToDelete = shapeInteraction.findShapeAt(mousePos, shapes, ctx);
                 if (shapeToDelete) {
                     saveState();
 
@@ -1197,7 +881,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         // Recalcule le compteur de points
                         const pointNames = shapes.filter(s => s.type === 'point' && s.name).map(p => p.name);
                         if (pointNames.length > 0) {
-                            pointNameCounter = Math.max(0, ...pointNames.map(getPointNumber));
+                        pointNameCounter = Math.max(0, ...pointNames.map(utils.getPointNumber));
                         } else {
                             pointNameCounter = 0;
                         }
