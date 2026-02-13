@@ -468,6 +468,14 @@ document.addEventListener('DOMContentLoaded', () => {
         currentMousePos = mousePos; // Mettre à jour l'état global pour le dessin des lignes temporaires
         snapInfo = null; // Réinitialise à chaque mouvement
 
+        // Si on dessine une ligne (libre ou sur un outil), on cherche à magnétiser le point final
+        if (isDrawingLine) {
+            const snapResult = snap.getSnap(mousePos, shapes);
+            if (snapResult.snapped && snapResult.type === 'point') {
+                snapInfo = snapResult; // Mémorise l'info pour le surlignage et le dessin
+            }
+        }
+
         // --- Logique de changement de curseur ---
         let cursorIsPencil = false;
 
@@ -594,14 +602,28 @@ document.addEventListener('DOMContentLoaded', () => {
                 break;
             case 'line':
                 if (!isDrawingLine) {
+                    // Premier clic : début de la ligne
                     isDrawingLine = true;
-                    lineStartPoint = { x: mousePos.x, y: mousePos.y };
+                    // Magnétise le point de départ s'il est proche d'un point existant
+                    const snapResult = snap.getSnap(mousePos, shapes);
+                    if (snapResult.snapped && snapResult.type === 'point') {
+                        lineStartPoint = snapResult.position;
+                    } else {
+                        lineStartPoint = { x: mousePos.x, y: mousePos.y };
+                    }
                 } else {
+                    // Deuxième clic : fin de la ligne
                     saveState();
-                    shapes.push({ type: 'line', x1: lineStartPoint.x, y1: lineStartPoint.y, x2: mousePos.x, y2: mousePos.y, color: currentColor });
+                    let endPos = { x: mousePos.x, y: mousePos.y };
+                    // Magnétise le point d'arrivée s'il est proche d'un point existant
+                    const snapResult = snap.getSnap(mousePos, shapes);
+                    if (snapResult.snapped && snapResult.type === 'point') {
+                        endPos = snapResult.position;
+                    }
+                    shapes.push({ type: 'line', x1: lineStartPoint.x, y1: lineStartPoint.y, x2: endPos.x, y2: endPos.y, color: currentColor });
                     isDrawingLine = false;
                     lineStartPoint = null;
-                    currentMousePos = null;
+                    snapInfo = null; // Nettoie l'info de magnétisme pour enlever le surlignage
                     redrawCanvas();
                 }
                 break;
