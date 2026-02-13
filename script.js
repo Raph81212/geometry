@@ -588,19 +588,40 @@ document.addEventListener('DOMContentLoaded', () => {
 
             // Si on déplace un point, on met à jour les lignes connectées
             if (draggedShape.type === 'point') {
-                const oldX = draggedShape.x;
-                const oldY = draggedShape.y;
+                const draggedPointName = draggedShape.name;
 
-                shapes.forEach(s => {
-                    if (s.type === 'line') {
-                        // Utilise une petite tolérance pour la comparaison des flottants
-                        if (Math.hypot(s.x1 - oldX, s.y1 - oldY) < 1) {
-                            s.x1 = newX;
-                            s.y1 = newY;
-                        }
-                        if (Math.hypot(s.x2 - oldX, s.y2 - oldY) < 1) {
-                            s.x2 = newX;
-                            s.y2 = newY;
+                shapes.forEach(line => {
+                    if (line.type === 'line' && line.definingPoints) {
+                        const [p1_name, p2_name] = line.definingPoints;
+
+                        if (p1_name === draggedPointName || p2_name === draggedPointName) {
+                            if (line.lineType === 'segment') {
+                                if (p1_name === draggedPointName) {
+                                    line.x1 = newX;
+                                    line.y1 = newY;
+                                }
+                                if (p2_name === draggedPointName) {
+                                    line.x2 = newX;
+                                    line.y2 = newY;
+                                }
+                            } else if (line.lineType === 'line') {
+                                const p1 = shapes.find(p => p.type === 'point' && p.name === p1_name);
+                                const p2 = shapes.find(p => p.type === 'point' && p.name === p2_name);
+
+                                if (p1 && p2) {
+                                    // Get the updated coordinates of both points
+                                    const p1_coords = (p1_name === draggedPointName) ? { x: newX, y: newY } : { x: p1.x, y: p1.y };
+                                    const p2_coords = (p2_name === draggedPointName) ? { x: newX, y: newY } : { x: p2.x, y: p2.y };
+
+                                    const intersections = calculateLineCanvasIntersections(p1_coords, p2_coords, canvas.width, canvas.height);
+                                    if (intersections.length === 2) {
+                                        line.x1 = intersections[0].x;
+                                        line.y1 = intersections[0].y;
+                                        line.x2 = intersections[1].x;
+                                        line.y2 = intersections[1].y;
+                                    }
+                                }
+                            }
                         }
                     }
                 });

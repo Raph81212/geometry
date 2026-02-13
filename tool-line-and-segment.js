@@ -3,6 +3,22 @@ import { calculateLineCanvasIntersections } from './line-utils.js';
 import * as snap from './snap.js'; // Need snap for point snapping
 
 /**
+ * Helper function to get an existing point or create a new one.
+ */
+function getOrCreatePoint(mousePos, clickedPoint, shapes, currentColor, getPointName, incrementPointCounter) {
+    if (clickedPoint) {
+        return clickedPoint;
+    }
+    // If no point is snapped, create a new one.
+    incrementPointCounter();
+    const name = getPointName();
+    const newPoint = { type: 'point', x: mousePos.x, y: mousePos.y, name, color: currentColor };
+    shapes.push(newPoint);
+    return newPoint;
+}
+
+
+/**
  * Gère les clics de souris pour les outils Segment et Droite.
  * @param {object} params - Paramètres nécessaires.
  * @param {{x: number, y: number}} params.mousePos - Position actuelle de la souris.
@@ -25,73 +41,40 @@ export function handleMouseDown({ mousePos, lineState, shapes, snap, canvas, cur
         clickedPoint = snapResult.snappedShape;
     }
 
-    if (lineState.mode === 'segment') {
-        if (!lineState.isDrawing) {
-            // Premier clic pour segment: define start point
-            lineState.isDrawing = true;
-            if (clickedPoint) {
-                lineState.startPoint = { x: clickedPoint.x, y: clickedPoint.y };
-            } else {
-                // Create a new point if not snapped
-                incrementPointCounter();
-                const name = getPointName(); // getPointName will use the incremented counter
-                const newPoint = { type: 'point', x: mousePos.x, y: mousePos.y, name, color: currentColor };
-                shapes.push(newPoint); // Add the new point to shapes
-                lineState.startPoint = { x: newPoint.x, y: newPoint.y };
-            }
-        } else {
-            // Second click for segment: define end point and create segment
-            let endPos = { x: mousePos.x, y: mousePos.y };
-            if (clickedPoint) {
-                endPos = { x: clickedPoint.x, y: clickedPoint.y };
-            } else {
-                // Create a new point if not snapped
-                incrementPointCounter();
-                const name = getPointName();
-                const newPoint = { type: 'point', x: mousePos.x, y: mousePos.y, name, color: currentColor };
-                shapes.push(newPoint); // Add the new point to shapes
-                endPos = { x: newPoint.x, y: newPoint.y };
-            }
-            newShape = { type: 'line', x1: lineState.startPoint.x, y1: lineState.startPoint.y, x2: endPos.x, y2: endPos.y, color: currentColor };
-            resetState(lineState);
-        }
-    } else { // mode === 'line'
-        if (!lineState.startPoint) {
-            // First click for line: define first point
-            lineState.isDrawing = true;
-            if (clickedPoint) {
-                lineState.startPoint = { x: clickedPoint.x, y: clickedPoint.y };
-            } else {
-                // Create a new point if not snapped
-                incrementPointCounter();
-                const name = getPointName();
-                const newPoint = { type: 'point', x: mousePos.x, y: mousePos.y, name, color: currentColor };
-                shapes.push(newPoint); // Add the new point to shapes
-                lineState.startPoint = { x: newPoint.x, y: newPoint.y };
-            }
-        } else {
-            // Second click for line: define second point and create line
-            let p2 = { x: mousePos.x, y: mousePos.y };
-            if (clickedPoint) {
-                p2 = { x: clickedPoint.x, y: clickedPoint.y };
-            } else {
-                // Create a new point if not snapped
-                incrementPointCounter();
-                const name = getPointName();
-                const newPoint = { type: 'point', x: mousePos.x, y: mousePos.y, name, color: currentColor };
-                shapes.push(newPoint); // Add the new point to shapes
-                p2 = { x: newPoint.x, y: newPoint.y };
-            }
+    if (!lineState.isDrawing) {
+        // First click for either segment or line
+        lineState.isDrawing = true;
+        const startPoint = getOrCreatePoint(mousePos, clickedPoint, shapes, currentColor, getPointName, incrementPointCounter);
+        lineState.startPoint = { x: startPoint.x, y: startPoint.y, name: startPoint.name };
+    } else {
+        // Second click
+        const endPoint = getOrCreatePoint(mousePos, clickedPoint, shapes, currentColor, getPointName, incrementPointCounter);
 
-            // Ensure points are distinct before drawing a line
-            if (Math.hypot(p2.x - lineState.startPoint.x, p2.y - lineState.startPoint.y) > 1) {
-                const intersections = calculateLineCanvasIntersections(lineState.startPoint, p2, canvas.width, canvas.height);
+        if (Math.hypot(endPoint.x - lineState.startPoint.x, endPoint.y - lineState.startPoint.y) > 1) {
+            if (lineState.mode === 'segment') {
+                newShape = { 
+                    type: 'line', 
+                    lineType: 'segment', 
+                    x1: lineState.startPoint.x, y1: lineState.startPoint.y, 
+                    x2: endPoint.x, y2: endPoint.y, 
+                    color: currentColor, 
+                    definingPoints: [lineState.startPoint.name, endPoint.name] 
+                };
+            } else { // mode === 'line'
+                const intersections = calculateLineCanvasIntersections(lineState.startPoint, endPoint, canvas.width, canvas.height);
                 if (intersections.length === 2) {
-                    newShape = { type: 'line', x1: intersections[0].x, y1: intersections[0].y, x2: intersections[1].x, y2: intersections[1].y, color: currentColor };
+                    newShape = { 
+                        type: 'line', 
+                        lineType: 'line', 
+                        x1: intersections[0].x, y1: intersections[0].y, 
+                        x2: intersections[1].x, y2: intersections[1].y, 
+                        color: currentColor, 
+                        definingPoints: [lineState.startPoint.name, endPoint.name] 
+                    };
                 }
             }
-            resetState(lineState);
         }
+        resetState(lineState);
     }
     return newShape;
 }
