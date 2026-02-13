@@ -27,7 +27,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const saveRecordingButton = document.getElementById('btn-save-recording');
     const loadRecordingButton = document.getElementById('btn-load-recording');
     const recordingLoader = document.getElementById('recording-loader');
-    const colorPicker = document.getElementById('color-picker');
+    const colorPickerWrapper = document.getElementById('color-picker-wrapper');
+    const currentColorDisplay = document.getElementById('current-color-display');
+    const colorSwatches = document.querySelectorAll('#color-palette-popup .color-swatch');
     const rulerOptions = document.getElementById('ruler-options');
     const rulerLengthInput = document.getElementById('ruler-length');
     const gridSelect = document.getElementById('grid-select');
@@ -40,7 +42,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let undoStack = [];
     let redoStack = [];
     let pointNameCounter = 0; // Pour nommer les points A, B, C...
-    let currentColor = '#000000'; // Couleur de dessin actuelle
+    let currentColor = '#000000'; // Couleur de dessin actuelle (noir par défaut)
 
     let currentTool = null;
     let isDrawingLine = false; // Pour gérer le dessin de ligne en 2 clics
@@ -391,6 +393,17 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    function updateColorDisplay() {
+        currentColorDisplay.style.backgroundColor = currentColor;
+        colorSwatches.forEach(swatch => {
+            if (swatch.dataset.color === currentColor) {
+                swatch.classList.add('active-color');
+            } else {
+                swatch.classList.remove('active-color');
+            }
+        });
+    }
+
     // Ajoute les écouteurs d'événements aux boutons d'outils
     toolButtons.forEach(button => {
         button.addEventListener('click', () => {
@@ -407,6 +420,33 @@ document.addEventListener('DOMContentLoaded', () => {
         const newLength = parseInt(e.target.value, 10);
         recordEvent('ruler_length_change', { length: newLength });
         executeRulerLengthChange(newLength);
+    });
+
+    currentColorDisplay.addEventListener('click', (e) => {
+        e.stopPropagation(); // Empêche le listener de document de se déclencher immédiatement
+        colorPickerWrapper.classList.toggle('open');
+    });
+
+    colorSwatches.forEach(swatch => {
+        swatch.addEventListener('click', (e) => {
+            if (isReplaying) return;
+            const newColor = e.target.dataset.color;
+            recordEvent('color_change', { color: newColor });
+            executeColorChange(newColor);
+            colorPickerWrapper.classList.remove('open'); // Ferme la palette après sélection
+        });
+    });
+
+    function executeColorChange(color) {
+        currentColor = color;
+        updateColorDisplay();
+    }
+
+    // Ferme la palette de couleurs si on clique en dehors
+    document.addEventListener('click', (e) => {
+        if (!colorPickerWrapper.contains(e.target)) {
+            colorPickerWrapper.classList.remove('open');
+        }
     });
 
     // --- Gestion des événements du Canvas ---
@@ -1093,6 +1133,8 @@ document.addEventListener('DOMContentLoaded', () => {
             case 'mousedown':           executeMouseDown(event.data.pos); break;
             case 'mousemove':           executeMouseMove(event.data.pos); break;
             case 'mouseup':             executeMouseUp(event.data.pos); break;
+            case 'color_change':        executeColorChange(event.data.color); break;
+            case 'color_change':        executeColorChange(event.data.color); break;
             case 'ruler_length_change': executeRulerLengthChange(event.data.length); break;
         }
 
@@ -1106,13 +1148,9 @@ document.addEventListener('DOMContentLoaded', () => {
     undoButton.addEventListener('click', undo);
     redoButton.addEventListener('click', redo);
 
-    gridSelect.addEventListener('change', (e) => {
-        gridType = e.target.value;
-        redrawCanvas();
-    });
-
-    colorPicker.addEventListener('input', (e) => {
-        currentColor = e.target.value;
+    gridSelect.addEventListener('change', (e) => { // Correction: gridSelect est déjà défini
+        gridType = e.target.value; // Correction: e.target.value est la bonne propriété
+        redrawCanvas(); // Correction: redrawCanvas est la fonction à appeler
     });
 
     // Bonus : Raccourcis clavier
@@ -1135,6 +1173,7 @@ document.addEventListener('DOMContentLoaded', () => {
     updateHistoryButtons();
     // Redimensionne le canvas une première fois
     resizeCanvas();
+    updateColorDisplay(); // Initialise l'affichage de la couleur active
     // Ajoute un écouteur pour redimensionner quand la fenêtre change de taille
     window.addEventListener('resize', resizeCanvas);
 });

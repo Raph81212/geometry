@@ -45,7 +45,16 @@
                 <input type="number" id="ruler-length" min="1" max="50" value="10">
             </div>
             <div class="separator"></div>
-            <input type="color" id="color-picker" title="Choisir la couleur" aria-label="Choisir la couleur">
+            <div id="color-picker-wrapper">
+                <button id="current-color-display" class="color-swatch" title="Changer la couleur"></button>
+                <div id="color-palette-popup">
+                    <button class="color-swatch" data-color="#000000" title="Noir" aria-label="Noir"></button>
+                    <button class="color-swatch" data-color="#FF0000" title="Rouge" aria-label="Rouge"></button>
+                    <button class="color-swatch" data-color="#0000FF" title="Bleu" aria-label="Bleu"></button>
+                    <button class="color-swatch" data-color="#008000" title="Vert" aria-label="Vert"></button>
+                    <button class="color-swatch" data-color="#FFA500" title="Orange" aria-label="Orange"></button>
+                </div>
+            </div>
             <div class="separator"></div>
             <button id="btn-undo" title="Retour arrière (Ctrl+Z)" aria-label="Annuler">↶</button>
             <button id="btn-redo" title="Retour avant (Ctrl+Y)" aria-label="Rétablir">↷</button>
