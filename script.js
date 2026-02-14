@@ -34,6 +34,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const colorSwatches = document.querySelectorAll('#color-palette-popup .color-swatch');
     const rulerOptions = document.getElementById('ruler-options');
     const rulerLengthInput = document.getElementById('ruler-length');
+    const compassOptions = document.getElementById('compass-options');
+    const compassRadiusInput = document.getElementById('compass-radius');
     const gridButton = document.getElementById('btn-grid');
 
     // --- État de l'application ---
@@ -225,11 +227,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Dessine le compas s'il existe, et l'arc temporaire en cours de tracé
         if (compassState.center) {
-            compass.drawCompass(ctx, compassState, isDraggingCompass, compassDragMode);
+            compass.drawCompass(ctx, compassState, isDraggingCompass, compassDragMode, currentColor);
             if (isDraggingCompass && compassDragMode === 'rotating') {
+                const compassColor = (currentColor === '#000000') ? '#B0B0B0' : currentColor;
                 ctx.beginPath();
                 ctx.arc(compassState.center.x, compassState.center.y, compassState.radius, arcState.startAngle, arcState.endAngle);
-                ctx.strokeStyle = '#808080' + '80'; // Gris semi-transparent pour le tracé
+                ctx.strokeStyle = compassColor + '80'; // Utilise la couleur choisie (ou gris par défaut)
                 ctx.lineWidth = 2;
                 ctx.stroke();
             }
@@ -309,6 +312,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             redrawCanvas();
             updateHistoryButtons();
+            syncCompassUI();
         }
     }
 
@@ -334,6 +338,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
             redrawCanvas();
             updateHistoryButtons();
+            syncCompassUI();
         }
     }
 
@@ -438,6 +443,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // --- Update UI ---
         updateToolButtons();
+        syncCompassUI();
         console.log(`Outil actif : ${currentTool}`);
         redrawCanvas();
     }
@@ -491,6 +497,15 @@ document.addEventListener('DOMContentLoaded', () => {
         executeRulerLengthChange(newLength);
     });
 
+    if (compassRadiusInput) {
+        compassRadiusInput.addEventListener('input', (e) => {
+            if (isReplaying) return;
+            const newRadiusCm = parseFloat(e.target.value);
+            recordEvent('compass_radius_change', { radius: newRadiusCm });
+            executeCompassRadiusChange(newRadiusCm);
+        });
+    }
+
     gridButton.addEventListener('click', () => {
         if (isReplaying) return;
         recordEvent('grid_change', {});
@@ -511,6 +526,36 @@ document.addEventListener('DOMContentLoaded', () => {
             colorPickerWrapper.classList.remove('open'); // Ferme la palette après sélection
         });
     });
+
+    function executeCompassRadiusChange(newRadiusCm) {
+        if (!isNaN(newRadiusCm) && newRadiusCm > 0 && compassState.center) {
+            const newRadiusPx = newRadiusCm * PIXELS_PER_CM;
+
+            // Préserve l'angle du crayon par rapport au centre
+            const dx = compassState.pencil.x - compassState.center.x;
+            const dy = compassState.pencil.y - compassState.center.y;
+            // Si le rayon est 0, l'angle est indéfini. On prend 0 par défaut (vers la droite).
+            const currentAngle = (compassState.radius > 1) ? Math.atan2(dy, dx) : 0;
+
+            compassState.radius = newRadiusPx;
+            compassState.pencil.x = compassState.center.x + newRadiusPx * Math.cos(currentAngle);
+            compassState.pencil.y = compassState.center.y + newRadiusPx * Math.sin(currentAngle);
+
+            redrawCanvas();
+        }
+    }
+
+    function syncCompassUI() {
+        if (compassOptions && compassRadiusInput) {
+            if (compassState.center) {
+                compassOptions.style.display = 'flex';
+                // Met à jour la valeur de l'input, avec une décimale
+                compassRadiusInput.value = (compassState.radius / PIXELS_PER_CM).toFixed(1);
+            } else {
+                compassOptions.style.display = 'none';
+            }
+        }
+    }
 
     function executeColorChange(color) {
         currentColor = color;
@@ -651,6 +696,7 @@ document.addEventListener('DOMContentLoaded', () => {
             redrawCanvas();
         } else if (isDraggingCompass) {
             snapInfo = compass.handleMouseMove(mousePos, compassState, compassDragMode, compassDragStart, arcState, shapes, snap);
+            syncCompassUI();
             redrawCanvas();
         } else if (isDraggingRuler) {
             snapInfo = ruler.handleMouseMove(mousePos, rulerState, rulerDragMode, rulerDragStart, shapes, snap);
@@ -863,6 +909,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 compassDragMode = result.dragMode;
                 // After starting to place, we are no longer in "placement mode".
                 currentTool = null;
+                syncCompassUI();
                 updateToolButtons();
                 break;
         }
@@ -899,10 +946,11 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         if (isDraggingCompass) {
-            compass.handleMouseUp(compassDragMode, arcState, compassState, shapes, saveState);
+            compass.handleMouseUp(compassDragMode, arcState, compassState, shapes, saveState, currentColor);
             isDraggingCompass = false;
             compassDragMode = null;
             needsRedraw = true;
+            syncCompassUI();
         }
         if (isDraggingRuler) {
             isDraggingRuler = false;
@@ -948,6 +996,7 @@ document.addEventListener('DOMContentLoaded', () => {
             rulerState.visible = false; // Cache la règle
             protractorState.visible = false; // Cache le rapporteur
             setSquareState.visible = false; // Cache l'équerre
+            syncCompassUI();
             redrawCanvas(); // redrawCanvas est appelé dans saveState via undo/redo
         }
     });
@@ -1016,6 +1065,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     redoStack = []; // On vide la pile "redo" lors d'un chargement
 
                     updateHistoryButtons();
+                    syncCompassUI();
                     redrawCanvas();
                 } else {
                     // Tente de charger l'ancien format pour la compatibilité (un simple tableau de formes)
@@ -1038,6 +1088,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         protractorState = { visible: false, centerX: 400, centerY: 300, radius: 150, angle: 0 };
                         setSquareState = { visible: false, cornerX: 200, cornerY: 200, size: 300, angle: 0 };
                         updateHistoryButtons();
+                        syncCompassUI();
                         redrawCanvas();
                         alert("Fichier d'un ancien format chargé. L'historique de construction n'est pas disponible.");
                     } else {
@@ -1173,6 +1224,7 @@ document.addEventListener('DOMContentLoaded', () => {
             angle: 0,
         };
         rulerLengthInput.value = 10; // Reset ruler length input
+        syncCompassUI();
 
         currentTool = null;
         lineTool.resetState(lineToolState); // Reset line tool state
@@ -1241,7 +1293,14 @@ document.addEventListener('DOMContentLoaded', () => {
             case 'mouseup':             executeMouseUp(event.data.pos); break;
             case 'color_change':        executeColorChange(event.data.color); break;
             case 'grid_change':         executeGridChange(); break;
-            case 'ruler_length_change': executeRulerLengthChange(event.data.length); break;
+            case 'ruler_length_change':
+                executeRulerLengthChange(event.data.length);
+                rulerLengthInput.value = event.data.length; // Met à jour l'affichage de l'input
+                break;
+            case 'compass_radius_change':
+                executeCompassRadiusChange(event.data.radius);
+                compassRadiusInput.value = event.data.radius; // Met à jour l'affichage de l'input
+                break;
         }
 
         replayTimeoutId = setTimeout(() => {

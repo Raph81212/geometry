@@ -1,6 +1,8 @@
 // tool-compass.js
 import { pointToLineSegmentDistance } from './utils.js';
 
+const PIXELS_PER_CM = 37.8; // Constante pour un écran à 96 DPI
+
 /**
  * Calcule la position de la charnière du compas pour un rendu réaliste.
  */
@@ -49,7 +51,7 @@ export function getCompassHit(pos, compassState) {
     return null;
 }
 
-export function drawCompass(ctx, compassState, isDraggingCompass, compassDragMode) {
+export function drawCompass(ctx, compassState, isDraggingCompass, compassDragMode, currentColor) {
     // Isolate all drawing operations for the compass to prevent state leakage.
     ctx.save();
 
@@ -213,14 +215,43 @@ export function drawCompass(ctx, compassState, isDraggingCompass, compassDragMod
         ctx.closePath();
         ctx.fill();
 
+        const compassColor = (currentColor === '#000000') ? '#B0B0B0' : currentColor;
         // Dessine la mine en graphite
-        ctx.fillStyle = (isDraggingCompass && compassDragMode === 'rotating') ? '#808080' : '#202020'; // Gris pour dessiner
+        ctx.fillStyle = (isDraggingCompass && compassDragMode === 'rotating') ? compassColor : '#202020'; // Couleur de dessin ou gris foncé
         ctx.beginPath();
         ctx.moveTo(pencil.x, pencil.y); // La pointe du crayon
         ctx.lineTo(pencilTipBase.x + pencilPerpX * pencilHolderWidth / 2, pencilTipBase.y + pencilPerpY * pencilHolderWidth / 2);
         ctx.lineTo(pencilTipBase.x - pencilPerpX * pencilHolderWidth / 2, pencilTipBase.y - pencilPerpY * pencilHolderWidth / 2);
         ctx.closePath();
         ctx.fill();
+    }
+
+    // --- 6. Afficher le rayon pendant l'utilisation ---
+    if (isDraggingCompass && (compassDragMode === 'resizing' || compassDragMode === 'rotating')) {
+        const radiusCm = (compassState.radius / PIXELS_PER_CM).toFixed(1);
+        const text = `R: ${radiusCm} cm`;
+
+        // Positionne le texte au-dessus de la poignée de la charnière
+        if (hinge) {
+            ctx.font = '14px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+
+            const textMetrics = ctx.measureText(text);
+            const textWidth = textMetrics.width;
+            const textHeight = 14;
+            const padding = 4;
+
+            // Positionne au-dessus de la tige de la charnière
+            const textX = hinge.x;
+            const textY = hinge.y - 35; // 25px pour la tige + 10px de marge
+
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
+            ctx.fillRect(textX - textWidth / 2 - padding, textY - textHeight / 2 - padding, textWidth + 2 * padding, textHeight + 2 * padding);
+
+            ctx.fillStyle = '#333';
+            ctx.fillText(text, textX, textY);
+        }
     }
 
     ctx.restore();
@@ -284,15 +315,38 @@ export function handleMouseMove(currentMousePos, compassState, compassDragMode, 
             compassState.pencil.y += moveDy;
             break;
         case 'resizing':
-            compassState.pencil = { ...currentMousePos };
+            let finalPencilX = currentMousePos.x;
+            let finalPencilY = currentMousePos.y;
+
+            if (snap && shapes) {
+                // Magnétise la mine sur les points existants lors du redimensionnement
+                snapResult = snap.getSnap(currentMousePos, shapes);
+                if (snapResult.snapped && snapResult.type === 'point') {
+                    finalPencilX = snapResult.position.x;
+                    finalPencilY = snapResult.position.y;
+                }
+            }
+            compassState.pencil = { x: finalPencilX, y: finalPencilY };
             break;
         case 'rotating':
-            const rotateDx = currentMousePos.x - compassState.center.x;
-            const rotateDy = currentMousePos.y - compassState.center.y;
-            const rotateAngle = Math.atan2(rotateDy, rotateDx);
-            compassState.pencil.x = compassState.center.x + compassState.radius * Math.cos(rotateAngle);
-            compassState.pencil.y = compassState.center.y + compassState.radius * Math.sin(rotateAngle);
-            arcState.endAngle = rotateAngle;
+            const visualDx = currentMousePos.x - compassState.center.x;
+            const visualDy = currentMousePos.y - compassState.center.y;
+            let newAngle = Math.atan2(visualDy, visualDx);
+
+            // "Déroule" le nouvel angle pour qu'il soit continu par rapport à l'angle final précédent.
+            // Cela évite les sauts lorsque l'on passe la frontière -PI / +PI.
+            while (newAngle < arcState.endAngle - Math.PI) {
+                newAngle += 2 * Math.PI;
+            }
+            while (newAngle > arcState.endAngle + Math.PI) {
+                newAngle -= 2 * Math.PI;
+            }
+
+            arcState.endAngle = newAngle;
+
+            // La position visuelle du crayon doit suivre exactement la souris.
+            compassState.pencil.x = compassState.center.x + compassState.radius * Math.cos(newAngle);
+            compassState.pencil.y = compassState.center.y + compassState.radius * Math.sin(newAngle);
             break;
     }
     // Mettre à jour le rayon après un déplacement ou un redimensionnement
@@ -302,12 +356,20 @@ export function handleMouseMove(currentMousePos, compassState, compassDragMode, 
     return snapResult;
 }
 
-export function handleMouseUp(compassDragMode, arcState, compassState, shapes, saveState) {
+export function handleMouseUp(compassDragMode, arcState, compassState, shapes, saveState, currentColor) {
     if (compassDragMode === 'rotating') {
         // Finalise et sauvegarde l'arc tracé
         if (Math.abs(arcState.endAngle - arcState.startAngle) > 0.01) {
+            // Utilise la couleur actuelle, mais gris clair si la couleur actuelle est le noir par défaut
+            const arcColor = (currentColor === '#000000') ? '#B0B0B0' : currentColor;
             saveState();
-            shapes.push({ type: 'arc', cx: compassState.center.x, cy: compassState.center.y, radius: compassState.radius, startAngle: arcState.startAngle, endAngle: arcState.endAngle, color: '#808080' }); // Sauvegarde en gris
+            shapes.push({ type: 'arc', cx: compassState.center.x, cy: compassState.center.y, radius: compassState.radius, startAngle: arcState.startAngle, endAngle: arcState.endAngle, color: arcColor });
         }
+    } else if (compassDragMode === 'resizing' && compassState.radius < 5) {
+        // This was a placement click without drag, set a default radius.
+        const defaultRadius = 100; // Agrandissement du rayon par défaut
+        compassState.pencil.x = compassState.center.x + defaultRadius;
+        compassState.pencil.y = compassState.center.y;
+        compassState.radius = defaultRadius;
     }
 }
