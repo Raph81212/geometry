@@ -128,6 +128,11 @@ button:hover {
     height: 100%;
     fill: currentColor;
 }
+
+.tool-btn svg.stroked-icon {
+    fill: none;
+    stroke: currentColor;
+}
 /* Style for the record button when recording */
 #btn-record.recording {
     background-color: #dc3545; /* Red */
