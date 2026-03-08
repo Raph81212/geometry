@@ -74,7 +74,7 @@ button:hover {
 #color-palette-popup {
     display: none; /* Caché par défaut */
     position: absolute;
-    bottom: calc(100% + 5px); /* Au-dessus du bouton principal avec un petit espace */
+    top: calc(100% + 5px); /* Au-dessus du bouton principal avec un petit espace */
     left: 50%;
     transform: translateX(-50%);
     background-color: white;
@@ -113,6 +113,7 @@ button:hover {
 .color-swatch[data-color="#0000FF"] { background-color: #0000FF; }
 .color-swatch[data-color="#008000"] { background-color: #008000; }
 .color-swatch[data-color="#FFA500"] { background-color: #FFA500; }
+.color-swatch[data-color="#B0B0B0"] { background-color: #B0B0B0; }
 /* Styles pour les boutons à icônes */
 .tool-btn {
     width: 40px;
