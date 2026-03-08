@@ -37,6 +37,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const compassOptions = document.getElementById('compass-options');
     const compassRadiusInput = document.getElementById('compass-radius');
     const gridButton = document.getElementById('btn-grid');
+    const autoNamePointsCheck = document.getElementById('auto-name-points-check');
 
     // --- État de l'application ---
     const PIXELS_PER_CM = 37.8; // Constante pour un écran à 96 DPI
@@ -825,7 +826,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 const newShape = lineTool.handleMouseDown({
                     mousePos, tool: currentTool, lineState: lineToolState, shapes, snap, canvas, currentColor,
                     getPointName: () => utils.getPointName(pointNameCounter), // Pass helper for point naming
-                    incrementPointCounter: () => pointNameCounter++ // Pass helper for counter increment
+                    incrementPointCounter: () => pointNameCounter++, // Pass helper for counter increment
+                    autoNamePoints: autoNamePointsCheck.checked
                 });
                 if (newShape) {
                     saveState();
