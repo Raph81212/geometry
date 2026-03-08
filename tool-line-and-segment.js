@@ -11,7 +11,11 @@ function getOrCreatePoint(mousePos, clickedPoint, shapes, currentColor, getPoint
     }
     // If no point is snapped, create a new one.
     incrementPointCounter();
-    const name = getPointName();
+    const defaultName = getPointName();
+    // Demande à l'utilisateur un nom, en utilisant le nom par défaut comme suggestion
+    const pointName = prompt('Entrez le nom du point :', defaultName);
+    // Utilise le nom fourni ou le nom par défaut si l'utilisateur annule ou efface
+    const name = pointName || defaultName;
     const newPoint = { type: 'point', x: mousePos.x, y: mousePos.y, name, color: currentColor };
     shapes.push(newPoint);
     return newPoint;
@@ -31,50 +35,55 @@ function getOrCreatePoint(mousePos, clickedPoint, shapes, currentColor, getPoint
  * @param {function} params.incrementPointCounter - Fonction pour incrémenter le compteur de points.
  * @returns {object|null} Une nouvelle forme de ligne si elle est complétée, sinon null.
  */
-export function handleMouseDown({ mousePos, lineState, shapes, snap, canvas, currentColor, getPointName, incrementPointCounter }) {
+export function handleMouseDown({ mousePos, tool, lineState, shapes, snap, canvas, currentColor, getPointName, incrementPointCounter }) {
     let newShape = null;
     let clickedPoint = null;
 
-    // Try to snap to an existing point
     const snapResult = snap.getSnap(mousePos, shapes);
     if (snapResult.snapped && snapResult.type === 'point') {
         clickedPoint = snapResult.snappedShape;
     }
 
-    if (!lineState.isDrawing) {
-        // First click for either segment or line
-        lineState.isDrawing = true;
-        const startPoint = getOrCreatePoint(mousePos, clickedPoint, shapes, currentColor, getPointName, incrementPointCounter);
-        lineState.startPoint = { x: startPoint.x, y: startPoint.y, name: startPoint.name };
-    } else {
-        // Second click
-        const endPoint = getOrCreatePoint(mousePos, clickedPoint, shapes, currentColor, getPointName, incrementPointCounter);
-
-        if (Math.hypot(endPoint.x - lineState.startPoint.x, endPoint.y - lineState.startPoint.y) > 1) {
-            if (lineState.mode === 'segment') {
-                newShape = { 
-                    type: 'line', 
-                    lineType: 'segment', 
-                    x1: lineState.startPoint.x, y1: lineState.startPoint.y, 
-                    x2: endPoint.x, y2: endPoint.y, 
-                    color: currentColor, 
-                    definingPoints: [lineState.startPoint.name, endPoint.name] 
-                };
-            } else { // mode === 'line'
-                const intersections = calculateLineCanvasIntersections(lineState.startPoint, endPoint, canvas.width, canvas.height);
-                if (intersections.length === 2) {
-                    newShape = { 
-                        type: 'line', 
-                        lineType: 'line', 
-                        x1: intersections[0].x, y1: intersections[0].y, 
-                        x2: intersections[1].x, y2: intersections[1].y, 
-                        color: currentColor, 
-                        definingPoints: [lineState.startPoint.name, endPoint.name] 
+    if (tool === 'point') {
+        if (clickedPoint) return null;
+        incrementPointCounter();
+        const defaultName = getPointName();
+        const pointName = prompt('Entrez le nom du point :', defaultName);
+        const name = pointName || defaultName;
+        newShape = { type: 'point', x: mousePos.x, y: mousePos.y, name, color: currentColor };
+    } else { // Outils 'segment' ou 'line'
+        if (!lineState.isDrawing) {
+            lineState.isDrawing = true;
+            const startPoint = getOrCreatePoint(mousePos, clickedPoint, shapes, currentColor, getPointName, incrementPointCounter);
+            lineState.startPoint = { x: startPoint.x, y: startPoint.y, name: startPoint.name };
+        } else {
+            const endPoint = getOrCreatePoint(mousePos, clickedPoint, shapes, currentColor, getPointName, incrementPointCounter);
+            if (Math.hypot(endPoint.x - lineState.startPoint.x, endPoint.y - lineState.startPoint.y) > 1) {
+                if (lineState.mode === 'segment') {
+                    newShape = {
+                        type: 'line',
+                        lineType: 'segment',
+                        x1: lineState.startPoint.x, y1: lineState.startPoint.y,
+                        x2: endPoint.x, y2: endPoint.y,
+                        color: currentColor,
+                        definingPoints: [lineState.startPoint.name, endPoint.name]
                     };
+                } else { // mode === 'line'
+                    const intersections = calculateLineCanvasIntersections(lineState.startPoint, endPoint, canvas.width, canvas.height);
+                    if (intersections.length === 2) {
+                        newShape = {
+                            type: 'line',
+                            lineType: 'line',
+                            x1: intersections[0].x, y1: intersections[0].y,
+                            x2: intersections[1].x, y2: intersections[1].y,
+                            color: currentColor,
+                            definingPoints: [lineState.startPoint.name, endPoint.name]
+                        };
+                    }
                 }
             }
+            resetState(lineState);
         }
-        resetState(lineState);
     }
     return newShape;
 }

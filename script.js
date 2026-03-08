@@ -583,20 +583,7 @@ document.addEventListener('DOMContentLoaded', () => {
         currentMousePos = mousePos; // Mettre à jour l'état global pour le dessin des lignes temporaires
         snapInfo = null; // Réinitialise à chaque mouvement
 
-        if (currentTool === 'point') {
-            // When creating a point, we want to snap to lines/segments.
-            const snapResult = snap.getSnap(mousePos, shapes.filter(s => s.type === 'line'));
-            if (snapResult.snapped) {
-                const line = snapResult.snappedShape;
-                const projectedPoint = utils.projectPointOnSegment(mousePos, {x: line.x1, y: line.y1}, {x: line.x2, y: line.y2});
-                snapInfo = {
-                    snapped: true,
-                    type: 'point_on_line',
-                    position: projectedPoint,
-                    snappedShape: line
-                };
-            }
-        } else if (lineToolState.isDrawing && (currentTool === 'segment' || currentTool === 'line')) {
+        if (lineToolState.isDrawing || currentTool === 'point') {
             // When drawing a line/segment, we want to snap to existing points.
             const snapResult = snap.getSnap(mousePos, shapes);
             if (snapResult.snapped && snapResult.type === 'point') {
@@ -786,20 +773,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // --- Priority 2: Perform action of the currently selected tool ---
         switch (currentTool) {
-            case 'point':
-                saveState();
-                pointNameCounter++;
-                const name = utils.getPointName(pointNameCounter);
-                
-                let finalPos = { x: mousePos.x, y: mousePos.y };
-                // If we have snap info from mouseMove, use it to place the point on the line
-                if (snapInfo && snapInfo.snapped && snapInfo.type === 'point_on_line') {
-                    finalPos = snapInfo.position;
-                }
-
-                shapes.push({ type: 'point', x: finalPos.x, y: finalPos.y, name, color: currentColor });
-                redrawCanvas();
-                break;
             case 'text':
                 const textContent = prompt("Entrez votre texte :");
                 if (textContent) { // N'ajoute rien si l'utilisateur annule
@@ -846,10 +819,11 @@ document.addEventListener('DOMContentLoaded', () => {
                     redrawCanvas();
                 }
                 break;
+            case 'point':
             case 'line':
             case 'segment': // Both segment and line modes are handled by the lineTool module
                 const newShape = lineTool.handleMouseDown({
-                    mousePos, lineState: lineToolState, shapes, snap, canvas, currentColor,
+                    mousePos, tool: currentTool, lineState: lineToolState, shapes, snap, canvas, currentColor,
                     getPointName: () => utils.getPointName(pointNameCounter), // Pass helper for point naming
                     incrementPointCounter: () => pointNameCounter++ // Pass helper for counter increment
                 });
