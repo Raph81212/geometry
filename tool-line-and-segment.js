@@ -5,17 +5,18 @@ import * as snap from './snap.js'; // Need snap for point snapping
 /**
  * Helper function to get an existing point or create a new one.
  */
-function getOrCreatePoint(mousePos, clickedPoint, shapes, currentColor, getPointName, incrementPointCounter) {
+function getOrCreatePoint(mousePos, clickedPoint, shapes, currentColor, getPointName, incrementPointCounter, autoNamePoints) {
     if (clickedPoint) {
         return clickedPoint;
     }
     // If no point is snapped, create a new one.
     incrementPointCounter();
     const defaultName = getPointName();
-    // Demande à l'utilisateur un nom, en utilisant le nom par défaut comme suggestion
-    const pointName = prompt('Entrez le nom du point :', defaultName);
-    // Utilise le nom fourni ou le nom par défaut si l'utilisateur annule ou efface
-    const name = pointName || defaultName;
+    let name = defaultName;
+    if (autoNamePoints) {
+        const pointName = prompt('Entrez le nom du point :', defaultName);
+        name = pointName || defaultName;
+    }
     const newPoint = { type: 'point', x: mousePos.x, y: mousePos.y, name, color: currentColor };
     shapes.push(newPoint);
     return newPoint;
@@ -35,7 +36,7 @@ function getOrCreatePoint(mousePos, clickedPoint, shapes, currentColor, getPoint
  * @param {function} params.incrementPointCounter - Fonction pour incrémenter le compteur de points.
  * @returns {object|null} Une nouvelle forme de ligne si elle est complétée, sinon null.
  */
-export function handleMouseDown({ mousePos, tool, lineState, shapes, snap, canvas, currentColor, getPointName, incrementPointCounter }) {
+export function handleMouseDown({ mousePos, tool, lineState, shapes, snap, canvas, currentColor, getPointName, incrementPointCounter, autoNamePoints }) {
     let newShape = null;
     let clickedPoint = null;
 
@@ -48,16 +49,19 @@ export function handleMouseDown({ mousePos, tool, lineState, shapes, snap, canva
         if (clickedPoint) return null;
         incrementPointCounter();
         const defaultName = getPointName();
-        const pointName = prompt('Entrez le nom du point :', defaultName);
-        const name = pointName || defaultName;
+        let name = defaultName;
+        if (autoNamePoints) {
+            const pointName = prompt('Entrez le nom du point :', defaultName);
+            name = pointName || defaultName;
+        }
         newShape = { type: 'point', x: mousePos.x, y: mousePos.y, name, color: currentColor };
     } else { // Outils 'segment' ou 'line'
         if (!lineState.isDrawing) {
             lineState.isDrawing = true;
-            const startPoint = getOrCreatePoint(mousePos, clickedPoint, shapes, currentColor, getPointName, incrementPointCounter);
+            const startPoint = getOrCreatePoint(mousePos, clickedPoint, shapes, currentColor, getPointName, incrementPointCounter, autoNamePoints);
             lineState.startPoint = { x: startPoint.x, y: startPoint.y, name: startPoint.name };
         } else {
-            const endPoint = getOrCreatePoint(mousePos, clickedPoint, shapes, currentColor, getPointName, incrementPointCounter);
+            const endPoint = getOrCreatePoint(mousePos, clickedPoint, shapes, currentColor, getPointName, incrementPointCounter, autoNamePoints);
             if (Math.hypot(endPoint.x - lineState.startPoint.x, endPoint.y - lineState.startPoint.y) > 1) {
                 if (lineState.mode === 'segment') {
                     newShape = {
