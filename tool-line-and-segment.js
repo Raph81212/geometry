@@ -5,7 +5,7 @@ import * as snap from './snap.js'; // Need snap for point snapping
 /**
  * Helper function to get an existing point or create a new one.
  */
-function getOrCreatePoint(mousePos, clickedPoint, shapes, currentColor, getPointName, incrementPointCounter, autoNamePoints) {
+function getOrCreatePoint(mousePos, clickedPoint, shapes, currentColor, getPointName, incrementPointCounter, autoNamePoints, isReplaying) {
     if (clickedPoint) {
         return clickedPoint;
     }
@@ -13,7 +13,7 @@ function getOrCreatePoint(mousePos, clickedPoint, shapes, currentColor, getPoint
     incrementPointCounter();
     const defaultName = getPointName();
     let name = defaultName;
-    if (autoNamePoints) {
+    if (autoNamePoints && !isReplaying) {
         const pointName = prompt('Entrez le nom du point :', defaultName);
         name = pointName || defaultName;
     }
@@ -36,7 +36,7 @@ function getOrCreatePoint(mousePos, clickedPoint, shapes, currentColor, getPoint
  * @param {function} params.incrementPointCounter - Fonction pour incrémenter le compteur de points.
  * @returns {object|null} Une nouvelle forme de ligne si elle est complétée, sinon null.
  */
-export function handleMouseDown({ mousePos, tool, lineState, shapes, snap, canvas, currentColor, getPointName, incrementPointCounter, autoNamePoints }) {
+export function handleMouseDown({ mousePos, tool, lineState, shapes, snap, canvas, currentColor, getPointName, incrementPointCounter, autoNamePoints, isReplaying }) {
     let newShape = null;
     let clickedPoint = null;
 
@@ -50,7 +50,7 @@ export function handleMouseDown({ mousePos, tool, lineState, shapes, snap, canva
         incrementPointCounter();
         const defaultName = getPointName();
         let name = defaultName;
-        if (autoNamePoints) {
+        if (autoNamePoints && !isReplaying) {
             const pointName = prompt('Entrez le nom du point :', defaultName);
             name = pointName || defaultName;
         }
@@ -58,10 +58,10 @@ export function handleMouseDown({ mousePos, tool, lineState, shapes, snap, canva
     } else { // Outils 'segment' ou 'line'
         if (!lineState.isDrawing) {
             lineState.isDrawing = true;
-            const startPoint = getOrCreatePoint(mousePos, clickedPoint, shapes, currentColor, getPointName, incrementPointCounter, autoNamePoints);
+            const startPoint = getOrCreatePoint(mousePos, clickedPoint, shapes, currentColor, getPointName, incrementPointCounter, autoNamePoints, isReplaying);
             lineState.startPoint = { x: startPoint.x, y: startPoint.y, name: startPoint.name };
         } else {
-            const endPoint = getOrCreatePoint(mousePos, clickedPoint, shapes, currentColor, getPointName, incrementPointCounter, autoNamePoints);
+            const endPoint = getOrCreatePoint(mousePos, clickedPoint, shapes, currentColor, getPointName, incrementPointCounter, autoNamePoints, isReplaying);
             if (Math.hypot(endPoint.x - lineState.startPoint.x, endPoint.y - lineState.startPoint.y) > 1) {
                 if (lineState.mode === 'segment') {
                     newShape = {

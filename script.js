@@ -827,7 +827,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     mousePos, tool: currentTool, lineState: lineToolState, shapes, snap, canvas, currentColor,
                     getPointName: () => utils.getPointName(pointNameCounter), // Pass helper for point naming
                     incrementPointCounter: () => pointNameCounter++, // Pass helper for counter increment
-                    autoNamePoints: autoNamePointsCheck.checked
+                    autoNamePoints: autoNamePointsCheck.checked,
+                    isReplaying: isReplaying
                 });
                 if (newShape) {
                     saveState();
